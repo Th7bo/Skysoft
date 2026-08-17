@@ -20,13 +20,33 @@ object AnimatedDyeArmorCache {
         SkysoftClientEvents.onDisconnect("Animated dye armor cache reset", stacks::clear)
     }
 
+    /**
+     * Hypixel animates dyed armour by re-sending the stack each frame stripped down to
+     * `custom_data{dye_item, id}` plus the new colour, with `hideTooltip = true`: no lore, no
+     * custom name, no `tooltip_style`, no enchantments, modifier or uuid. Anything reading the
+     * armour during those frames sees the degraded copy, which is why rarity backgrounds, item
+     * favourites and stat trackers all drop out together.
+     *
+     * Repair the stack as it arrives so the inventory never holds the stripped version, carrying
+     * over only the animated colour from the incoming frame.
+     */
     @JvmStatic
-    fun observe(inventory: Inventory, slot: Int, stack: ItemStack) {
-        if (inventory.player !== Minecraft.getInstance().player) return
+    fun repair(inventory: Inventory, slot: Int, stack: ItemStack): ItemStack {
+        if (inventory.player !== Minecraft.getInstance().player) return stack
         val equipmentSlot = Inventory.EQUIPMENT_SLOT_MAPPING[slot]
             ?.takeIf { it.type == EquipmentSlot.Type.HUMANOID_ARMOR }
-            ?: return
-        remember(equipmentSlot, stack)
+            ?: return stack
+        if (!stack.hasHiddenTooltip()) {
+            remember(equipmentSlot, stack)
+            return stack
+        }
+        val remembered = stacks[equipmentSlot] ?: return stack
+        if (remembered.item != stack.item || remembered.count != stack.count) return stack
+        val itemId = stack.skyBlockId() ?: return stack
+        if (remembered.skyBlockId() != itemId) return stack
+        val repaired = remembered.copy()
+        stack.get(DataComponents.DYED_COLOR)?.let { repaired.set(DataComponents.DYED_COLOR, it) }
+        return repaired
     }
 
     @JvmStatic
