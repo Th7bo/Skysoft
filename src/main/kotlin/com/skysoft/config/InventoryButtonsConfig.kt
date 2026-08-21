@@ -144,8 +144,14 @@ class InventoryButtonConfig(
     @JvmField @field:Expose var requiredKey: Int = GLFW.GLFW_KEY_UNKNOWN,
     @JvmField @field:Expose var scale: Float = DEFAULT_INVENTORY_BUTTON_SCALE,
     @JvmField @field:Expose var isUserCreated: Boolean? = null,
+    @JvmField @field:Expose var group: Int = NO_INVENTORY_BUTTON_GROUP,
+    @JvmField @field:Expose var toggleGroup: Int = NO_INVENTORY_BUTTON_GROUP,
 ) {
-    fun isActive(): Boolean = command.trim().isNotEmpty()
+    fun isActive(): Boolean = command.trim().isNotEmpty() || isGroupToggle()
+
+    fun isGroupToggle(): Boolean = toggleGroup != NO_INVENTORY_BUTTON_GROUP
+
+    fun isGrouped(): Boolean = group != NO_INVENTORY_BUTTON_GROUP
 
     fun copy(): InventoryButtonConfig = InventoryButtonConfig(
         x = x,
@@ -159,6 +165,8 @@ class InventoryButtonConfig(
         requiredKey = requiredKey,
         scale = scale,
         isUserCreated = isUserCreated,
+        group = group,
+        toggleGroup = toggleGroup,
     )
 
     fun repairLoadedValues(isLegacyExtraButton: Boolean = false) {
@@ -173,6 +181,8 @@ class InventoryButtonConfig(
             ?.coerceIn(MIN_INVENTORY_BUTTON_SCALE, MAX_INVENTORY_BUTTON_SCALE)
             ?: DEFAULT_INVENTORY_BUTTON_SCALE
         isUserCreated = isUserCreated ?: isLegacyExtraButton
+        group = group.coerceIn(NO_INVENTORY_BUTTON_GROUP, INVENTORY_BUTTON_GROUP_COUNT)
+        toggleGroup = toggleGroup.coerceIn(NO_INVENTORY_BUTTON_GROUP, INVENTORY_BUTTON_GROUP_COUNT)
     }
 }
 
@@ -183,6 +193,10 @@ const val MAX_INVENTORY_BUTTON_SCALE = 3f
 const val DEFAULT_INVENTORY_BUTTON_SCALE = 1f
 
 const val INVENTORY_BUTTON_SCALE_STEP = 0.1f
+
+const val NO_INVENTORY_BUTTON_GROUP = 0
+
+const val INVENTORY_BUTTON_GROUP_COUNT = 8
 
 private const val MIN_BUTTON_BACKGROUND_INDEX = 0
 

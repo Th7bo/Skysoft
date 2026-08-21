@@ -61,6 +61,7 @@ internal object InventoryButtonImportService {
         config.settings.clickType = snapshot.clickType
         config.details.tooltipDelay = snapshot.tooltipDelay
         SkysoftConfigGui.config().saveNow()
+        InventoryButtonGroups.collapseAll()
         InventoryButtonManager.clearIconCache()
         undoSnapshot = null
         lastError = null
@@ -98,6 +99,7 @@ internal object InventoryButtonImportService {
         plan.read.settings.clickType?.let { config.settings.clickType = it }
         plan.read.settings.tooltipDelay?.let { config.details.tooltipDelay = it }
         SkysoftConfigGui.config().saveNow()
+        InventoryButtonGroups.collapseAll()
         InventoryButtonManager.clearIconCache()
         pendingPlan = null
         lastError = null

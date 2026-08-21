@@ -1,7 +1,9 @@
 package com.skysoft.features.inventory
 
+import com.skysoft.config.INVENTORY_BUTTON_GROUP_COUNT
 import com.skysoft.config.InventoryButtonConfig
 import com.skysoft.config.InventoryButtonDefaults
+import com.skysoft.config.NO_INVENTORY_BUTTON_GROUP
 import com.skysoft.config.SkysoftConfigGui
 import com.skysoft.features.inventory.InventoryButtonManager.BUTTON_SIZE
 import com.skysoft.features.inventory.InventoryButtonManager.IconCandidate
@@ -58,6 +60,8 @@ object InventoryButtonEditorScreen {
         internal var lastPanelBounds: Rect? = null
         internal var lastResultsBounds: Rect? = null
         internal var lastRequiredKeyBounds: Rect? = null
+        internal var lastGroupBounds: Rect? = null
+        internal var lastToggleGroupBounds: Rect? = null
         internal var lastClearBounds: Rect? = null
         internal var lastDoneBounds: Rect? = null
         internal var hoveredIndex: Int? = null
@@ -96,6 +100,7 @@ object InventoryButtonEditorScreen {
             }
             if (handleRequiredKeyMouseClick(click) == InputHandlingResult.CONSUMED) return true
             waitingForRequiredKey = false
+            if (handleGroupMouseClick(click) == InputHandlingResult.CONSUMED) return true
             if (click.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) return super.mouseClicked(click, doubled)
             grabbedIndex = null
 
@@ -246,10 +251,7 @@ object InventoryButtonEditorScreen {
 
         private fun clearSelectedButtonIfPresent(): InputHandlingResult {
             val button = selectedButton() ?: return InputHandlingResult.IGNORED
-            button.command = ""
-            button.icon = null
-            button.backgroundIndex = 0
-            button.requiredKey = GLFW.GLFW_KEY_UNKNOWN
+            button.clearSettings()
             syncFieldsFromSelection()
             return InputHandlingResult.CONSUMED
         }
@@ -306,10 +308,7 @@ object InventoryButtonEditorScreen {
                 selectIconResultIfClicked(button, mouseX, mouseY) == InputHandlingResult.CONSUMED -> Unit
                 lastClearBounds?.contains(mouseX, mouseY) == true -> {
                     SoundUtilities.playClickSound()
-                    button.command = ""
-                    button.icon = null
-                    button.backgroundIndex = 0
-                    button.requiredKey = GLFW.GLFW_KEY_UNKNOWN
+                    button.clearSettings()
                     syncFieldsFromSelection()
                 }
                 lastDoneBounds?.contains(mouseX, mouseY) == true -> {
@@ -457,6 +456,124 @@ object InventoryButtonEditorScreen {
         }
     }
 
+    private fun InventoryButtonConfig.clearSettings() {
+        command = ""
+        icon = null
+        backgroundIndex = 0
+        requiredKey = GLFW.GLFW_KEY_UNKNOWN
+        group = NO_INVENTORY_BUTTON_GROUP
+        toggleGroup = NO_INVENTORY_BUTTON_GROUP
+    }
+
+    private fun EditorScreen.handleGroupMouseClick(click: MouseButtonEvent): InputHandlingResult {
+        val button = selectedButton() ?: return InputHandlingResult.IGNORED
+        val delta = when (click.button()) {
+            GLFW.GLFW_MOUSE_BUTTON_LEFT -> 1
+            GLFW.GLFW_MOUSE_BUTTON_RIGHT -> -1
+            else -> return InputHandlingResult.IGNORED
+        }
+        val mouseX = click.x().toInt()
+        val mouseY = click.y().toInt()
+        return when {
+            lastGroupBounds?.contains(mouseX, mouseY) == true -> {
+                SoundUtilities.playClickSound()
+                button.group = cycledButtonGroup(button.group, delta)
+                InputHandlingResult.CONSUMED
+            }
+            lastToggleGroupBounds?.contains(mouseX, mouseY) == true -> {
+                SoundUtilities.playClickSound()
+                button.toggleGroup = cycledButtonGroup(button.toggleGroup, delta)
+                InputHandlingResult.CONSUMED
+            }
+            else -> InputHandlingResult.IGNORED
+        }
+    }
+
+    private fun cycledButtonGroup(group: Int, delta: Int): Int {
+        val steps = INVENTORY_BUTTON_GROUP_COUNT + 1
+        return ((group + delta) % steps + steps) % steps
+    }
+
+    private fun renderGroupButtons(
+        screen: EditorScreen,
+        context: GuiGraphicsExtractor,
+        button: InventoryButtonConfig,
+        row: Rect,
+        mouseX: Int,
+        mouseY: Int,
+    ) {
+        val font = Minecraft.getInstance().font
+        val memberWidth = (row.width - SelectedEditor.GROUP_BUTTON_GAP) / 2
+        val member = Rect(row.x, row.y, memberWidth, row.height)
+        val toggle = Rect(
+            row.x + memberWidth + SelectedEditor.GROUP_BUTTON_GAP,
+            row.y,
+            row.width - memberWidth - SelectedEditor.GROUP_BUTTON_GAP,
+            row.height,
+        )
+        screen.lastGroupBounds = member
+        screen.lastToggleGroupBounds = toggle
+
+        PixelButtonRenderer.draw(
+            context,
+            font,
+            member,
+            "In: ${InventoryButtonGroups.groupLabel(button.group)}",
+            selected = button.isGrouped(),
+            hovered = member.contains(mouseX, mouseY),
+            enabled = true,
+        )
+        PixelButtonRenderer.draw(
+            context,
+            font,
+            toggle,
+            "Shows: ${InventoryButtonGroups.groupLabel(button.toggleGroup)}",
+            selected = button.isGroupToggle(),
+            hovered = toggle.contains(mouseX, mouseY),
+            enabled = true,
+        )
+
+        if (member.contains(mouseX, mouseY)) {
+            SkysoftNativeTooltip.setForNextFrame(
+                context,
+                buildList {
+                    if (button.isGrouped()) {
+                        add("§7This button only shows while group §e${button.group} §7is open.")
+                        if (screen.config.buttons.none { it.toggleGroup == button.group }) {
+                            add("§cNo button shows this group yet.")
+                        }
+                    } else {
+                        add("§7This button is always shown.")
+                    }
+                    add("§eLeft-click §7for the next group")
+                    add("§eRight-click §7for the previous group")
+                },
+                mouseX,
+                mouseY,
+            )
+        }
+        if (toggle.contains(mouseX, mouseY)) {
+            SkysoftNativeTooltip.setForNextFrame(
+                context,
+                buildList {
+                    if (button.isGroupToggle()) {
+                        add("§7Clicking this button shows or hides group §e${button.toggleGroup}§7.")
+                        add("§7Toggle buttons work without a command.")
+                        if (screen.config.buttons.none { it.group == button.toggleGroup }) {
+                            add("§cNo button is in this group yet.")
+                        }
+                    } else {
+                        add("§7This button does not toggle a group.")
+                    }
+                    add("§eLeft-click §7for the next group")
+                    add("§eRight-click §7for the previous group")
+                },
+                mouseX,
+                mouseY,
+            )
+        }
+    }
+
     private object EditorRenderer {
         fun renderInventoryPreview(screen: EditorScreen, context: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
             val previewScale = inventoryPreviewScale()
@@ -536,6 +653,8 @@ object InventoryButtonEditorScreen {
                 )
                 screen.lastResultsBounds = null
                 screen.lastRequiredKeyBounds = null
+                screen.lastGroupBounds = null
+                screen.lastToggleGroupBounds = null
                 screen.lastClearBounds = null
                 screen.lastDoneBounds = null
                 return
@@ -640,12 +759,15 @@ object InventoryButtonEditorScreen {
                     val action = if (placement.button.isActive()) "edit" else "create a button"
                     SkysoftNativeTooltip.setForNextFrame(
                         context,
-                        listOf(
-                            if (placement.button.isActive()) {
-                                "§7Command: §e${InventoryButtonManager.displayCommand(placement.button.command)}"
-                            } else {
-                                "§7Empty button slot"
+                        listOfNotNull(
+                            when {
+                                placement.button.command.isNotBlank() ->
+                                    "§7Command: §e${InventoryButtonManager.displayCommand(placement.button.command)}"
+                                placement.button.isGroupToggle() -> "§7Group toggle"
+                                else -> "§7Empty button slot"
                             },
+                            "§7Group: §e${placement.button.group}".takeIf { placement.button.isGrouped() },
+                            "§7Shows Group: §e${placement.button.toggleGroup}".takeIf { placement.button.isGroupToggle() },
                             "§7Scale: §e${"%.2f".format(Locale.US, placement.button.scale)}",
                             if (placement.button.requiredKey != GLFW.GLFW_KEY_UNKNOWN) {
                                 "§7Hold Key: §e${InputUtilities.bindingName(placement.button.requiredKey)}"
@@ -741,6 +863,11 @@ object InventoryButtonEditorScreen {
                     mouseY,
                 )
             }
+            y += SelectedEditor.FIELD_SECTION_GAP
+
+            context.text(font, "Group", x, y, EditorColors.MUTED_TEXT, false)
+            y += SelectedEditor.LABEL_TO_FIELD_GAP
+            renderGroupButtons(screen, context, button, Rect(x, y, fieldWidth, EditorPanel.FIELD_HEIGHT), mouseX, mouseY)
             y += SelectedEditor.FIELD_SECTION_GAP
 
             context.text(font, "Background", x, y, EditorColors.MUTED_TEXT, false)
@@ -1082,14 +1209,14 @@ object InventoryButtonEditorScreen {
 
     private object EditorPanel {
         const val WIDTH = 196
-        const val HEIGHT = 318
+        const val HEIGHT = 354
         const val MARGIN = 8
         const val INSET = 10
         const val FIELD_HEIGHT = 18
         const val TITLE_Y = 9
         const val COMMAND_FIELD_Y = 47
-        const val BACKGROUND_PICKER_Y = 119
-        const val ICON_FIELD_Y = 182
+        const val BACKGROUND_PICKER_Y = 155
+        const val ICON_FIELD_Y = 218
         const val BACKGROUND_PICKER_COUNT = 7
         const val EMPTY_HELP_X_OFFSET = 12
         const val EMPTY_HELP_Y_OFFSET = 42
@@ -1105,6 +1232,7 @@ object InventoryButtonEditorScreen {
         const val ICON_LABEL_MAX_LENGTH = 26
         const val SELECTED_ICON_SECTION_GAP = 15
         const val ICON_SEARCH_SECTION_GAP = 24
+        const val GROUP_BUTTON_GAP = 4
     }
 
     private object IconResults {

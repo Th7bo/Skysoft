@@ -34,7 +34,7 @@ Follow Bazaar order progress in real time without repeatedly opening the Bazaar.
 
 ### Inventory Buttons
 
-Create fully customizable buttons for quick access to your favorite menus and commands.
+Create fully customizable buttons for quick access to your favorite menus and commands. Put buttons in a group and give one button the job of showing or hiding that group, so activity-specific shortcuts only take up space while you need them.
 
 <p align="center">
   <img src="https://cdn.modrinth.com/data/cached_images/eb7dfdd06d00a2741ec35f465b0413a3b1ed53c1_0.webp" alt="Main Inventory" width="32%">

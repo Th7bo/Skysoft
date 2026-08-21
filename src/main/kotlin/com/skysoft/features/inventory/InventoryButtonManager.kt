@@ -25,6 +25,7 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 import com.skysoft.utils.SkysoftClientEvents
+import com.skysoft.utils.SoundUtilities
 import net.minecraft.ChatFormatting
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -94,7 +95,15 @@ object InventoryButtonManager {
         var hovered: InventoryButtonConfig? = null
         for (placement in placements) {
             val hoveredNow = placement.bounds.contains(mouseX, mouseY)
-            drawButton(context, placement.bounds.x, placement.bounds.y, placement.button, active = true, hovered = hoveredNow)
+            drawButton(
+                context,
+                placement.bounds.x,
+                placement.bounds.y,
+                placement.button,
+                active = true,
+                hovered = hoveredNow,
+                selected = InventoryButtonGroups.isExpanded(placement.button.toggleGroup),
+            )
             if (hoveredNow) hovered = placement.button
         }
 
@@ -109,9 +118,13 @@ object InventoryButtonManager {
             hoveredMillis = now
         }
         if (now - hoveredMillis >= config.details.tooltipDelay) {
-            val command = displayCommand(hovered.command)
             val tooltip = buildList {
-                add(Component.literal(command).withStyle(ChatFormatting.GRAY))
+                if (hovered.isGroupToggle()) {
+                    add(Component.literal(InventoryButtonGroups.toggleDescription(hovered)).withStyle(ChatFormatting.GRAY))
+                }
+                if (hovered.command.isNotBlank()) {
+                    add(Component.literal(displayCommand(hovered.command)).withStyle(ChatFormatting.GRAY))
+                }
                 if (hovered.requiredKey != GLFW.GLFW_KEY_UNKNOWN) {
                     add(
                         Component.literal("Hold ${InputUtilities.bindingName(hovered.requiredKey)} to use")
@@ -142,7 +155,11 @@ object InventoryButtonManager {
         return activateButtonAtClick(screen, click)
     }
 
-    fun placements(screen: AbstractContainerScreen<*>, includeInactive: Boolean): List<ButtonPlacement> {
+    fun placements(
+        screen: AbstractContainerScreen<*>,
+        includeInactive: Boolean,
+        includeHiddenGroups: Boolean = includeInactive,
+    ): List<ButtonPlacement> {
         val accessor = screen as AbstractContainerScreenAccessor
         val reserved = ItemListController.reservedBounds(screen)
         return placements(
@@ -152,6 +169,7 @@ object InventoryButtonManager {
             imageHeight = accessor.skysoftGetImageHeight(),
             playerInventory = screen is InventoryScreen,
             includeInactive = includeInactive,
+            includeHiddenGroups = includeHiddenGroups,
         ).filterNot { placement -> reserved?.intersects(placement.bounds) == true }
     }
 
@@ -162,10 +180,12 @@ object InventoryButtonManager {
         imageHeight: Int,
         playerInventory: Boolean,
         includeInactive: Boolean,
+        includeHiddenGroups: Boolean = includeInactive,
     ): List<ButtonPlacement> {
         val canvas = InventoryButtonCanvas(Rect(left, top, imageWidth, imageHeight), playerInventory)
         return config.buttons.mapIndexedNotNull { index, button ->
             if (!includeInactive && !button.isActive()) return@mapIndexedNotNull null
+            if (!includeHiddenGroups && !InventoryButtonGroups.isVisible(button)) return@mapIndexedNotNull null
             if (button.playerInvOnly && !playerInventory) return@mapIndexedNotNull null
             val bounds = InventoryButtonLayout.buttonBounds(canvas, button)
             if (canvas.overlapsContainer(bounds)) return@mapIndexedNotNull null
@@ -324,7 +344,12 @@ object InventoryButtonManager {
         ) {
             return InputHandlingResult.IGNORED
         }
-        if (screen.menu.carried.isEmpty) executeCommand(placement.button.command)
+        if (!screen.menu.carried.isEmpty) return InputHandlingResult.CONSUMED
+        if (placement.button.isGroupToggle()) {
+            SoundUtilities.playClickSound()
+            InventoryButtonGroups.toggle(placement.button, config.buttons)
+        }
+        executeCommand(placement.button.command)
         return InputHandlingResult.CONSUMED
     }
 
@@ -407,6 +432,8 @@ private data class InventoryButtonEditorValue(
     val requiredKey: Int,
     val scale: Float,
     val isUserCreated: Boolean?,
+    val group: Int,
+    val toggleGroup: Int,
 )
 
 private fun InventoryButtonConfig.editorValue(): InventoryButtonEditorValue = InventoryButtonEditorValue(
@@ -421,6 +448,8 @@ private fun InventoryButtonConfig.editorValue(): InventoryButtonEditorValue = In
     requiredKey,
     scale,
     isUserCreated,
+    group,
+    toggleGroup,
 )
 
 internal enum class InventoryButtonResetShortcutResult {
@@ -537,7 +566,7 @@ private fun drawButtonContents(
 ) {
     InventoryButtonManager.drawButtonBackground(context, 0, 0, button.backgroundIndex, active, hovered, selected)
     if (active) {
-        val icon = button.icon?.takeIf { it.isNotBlank() }
+        val icon = button.icon?.takeIf { it.isNotBlank() } ?: groupToggleFallbackIcon(button)
         val stack = icon?.let(InventoryButtonManager::iconStack)
         if (stack != null && !stack.isEmpty) {
             context.item(stack, 1, 1)
@@ -548,6 +577,11 @@ private fun drawButtonContents(
         val color = if (hovered || selected) 0xFFFFFFFF.toInt() else 0xFFCCCCCC.toInt()
         context.text(Minecraft.getInstance().font, "+", ADD_ICON_X_OFFSET, ADD_ICON_Y_OFFSET, color, false)
     }
+}
+
+private fun groupToggleFallbackIcon(button: InventoryButtonConfig): String? {
+    if (!button.isGroupToggle() || button.command.isNotBlank()) return null
+    return if (InventoryButtonGroups.isExpanded(button.toggleGroup)) "text:-" else "text:+"
 }
 
 private fun normalizedInventoryButtonScale(scale: Float): Float = scale
