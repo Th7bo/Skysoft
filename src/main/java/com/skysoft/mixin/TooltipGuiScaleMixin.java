@@ -40,19 +40,22 @@ public class TooltipGuiScaleMixin {
     private void skysoftRenderTooltipAtSeparateScale(GuiGraphicsExtractor graphics, int x, int y, java.util.function.Consumer<int[]> render) {
         Minecraft minecraft = Minecraft.getInstance();
         Screen screen = MinecraftClient.INSTANCE.screen(minecraft);
-        if (!GuiScaleController.usesSeparateTooltipScale(screen)) { render.accept(new int[] {x, y}); return; }
         var window = minecraft.getWindow();
-        int tooltipScale = GuiScaleController.resolve(screen, window).tooltip();
-        if (window.getGuiScale() == tooltipScale) { render.accept(new int[] {x, y}); return; }
-        int activeScale = Math.max(1, window.getGuiScale());
-        int tooltipX = GuiScaleController.convertCoordinate(x, activeScale, tooltipScale);
-        int tooltipY = GuiScaleController.convertCoordinate(y, activeScale, tooltipScale);
-        float poseScale = tooltipScale / (float) activeScale;
-        graphics.pose().pushMatrix();
-        try (var ignored = GuiScaleController.useTooltipScale(screen, window)) {
-            graphics.pose().scale(poseScale, poseScale);
-            render.accept(new int[] {tooltipX, tooltipY});
-        } finally { graphics.pose().popMatrix(); }
+        try (TooltipViewport.RenderZoomScope zoomScope = TooltipViewport.useRenderZoom()) {
+            double zoom = zoomScope.getZoom();
+            boolean usesTooltipScale = GuiScaleController.usesSeparateTooltipScale(screen);
+            int activeScale = Math.max(1, window.getGuiScale());
+            int tooltipScale = usesTooltipScale ? GuiScaleController.resolve(screen, window).tooltip() : activeScale;
+            if (tooltipScale == activeScale && zoom == 1.0) { render.accept(new int[] {x, y}); return; }
+            int tooltipX = GuiScaleController.convertCoordinate(x, activeScale, tooltipScale);
+            int tooltipY = GuiScaleController.convertCoordinate(y, activeScale, tooltipScale);
+            float poseScale = (float) (tooltipScale / (double) activeScale * zoom);
+            graphics.pose().pushMatrix();
+            try (GuiScaleController.WindowScaleOverride ignored = usesTooltipScale ? GuiScaleController.useTooltipScale(screen, window) : null) {
+                graphics.pose().scale(poseScale, poseScale);
+                render.accept(new int[] {tooltipX, tooltipY});
+            } finally { graphics.pose().popMatrix(); }
+        }
     }
 
     @WrapOperation(method = "tooltip(Lnet/minecraft/client/gui/Font;Ljava/util/List;IILnet/minecraft/client/gui/screens/inventory/tooltip/ClientTooltipPositioner;Lnet/minecraft/resources/Identifier;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/inventory/tooltip/ClientTooltipPositioner;positionTooltip(IIIIII)Lorg/joml/Vector2ic;"))

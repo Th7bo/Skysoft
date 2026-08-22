@@ -43,6 +43,9 @@ class TooltipScrollConfig : ConfigRepairable {
             MIN_TOOLTIP_SCROLL_SMOOTHNESS,
             MAX_TOOLTIP_SCROLL_SMOOTHNESS,
         )
+        settings.zoomSpeed = settings.zoomSpeed.coerceIn(MIN_TOOLTIP_ZOOM_SPEED, MAX_TOOLTIP_ZOOM_SPEED)
+        details.minimumZoom = details.minimumZoom.coerceIn(MIN_TOOLTIP_ZOOM, DEFAULT_TOOLTIP_ZOOM)
+        details.maximumZoom = details.maximumZoom.coerceIn(details.minimumZoom, MAX_TOOLTIP_ZOOM)
     }
 }
 
@@ -107,9 +110,27 @@ class TooltipScrollSettingsConfig {
 
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Reset Tooltip Key", desc = "Reset the hovered tooltip's moved position.")
+    @field:ConfigOption(name = "Reset Tooltip Key", desc = "Reset the hovered tooltip's moved position and zoom.")
     @field:ConfigEditorKeybind(defaultKey = GLFW.GLFW_KEY_UNKNOWN)
     var resetTooltipKey = GLFW.GLFW_KEY_UNKNOWN
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Enable Zoom", desc = "Hold the zoom key and scroll to resize the hovered tooltip.")
+    @field:ConfigEditorBoolean
+    var enableZoom = true
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Zoom Key", desc = "Hold this key to zoom the hovered tooltip with the mouse wheel.")
+    @field:ConfigEditorKeybind(defaultKey = GLFW.GLFW_KEY_LEFT_CONTROL)
+    var zoomKey = GLFW.GLFW_KEY_LEFT_CONTROL
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Zoom Speed", desc = "Percent the tooltip size changes per mouse-wheel step while zooming.")
+    @field:ConfigEditorSlider(minValue = 1f, maxValue = 50f, minStep = 1f)
+    var zoomSpeed = DEFAULT_TOOLTIP_ZOOM_SPEED
 }
 
 class TooltipScrollDetailsConfig {
@@ -148,6 +169,27 @@ class TooltipScrollDetailsConfig {
     @field:ConfigOption(name = "Scroll Smoothness", desc = "How quickly tooltips slide toward the moved position. 100 is instant.")
     @field:ConfigEditorSlider(minValue = 5f, maxValue = 100f, minStep = 5f)
     var scrollSmoothness = DEFAULT_TOOLTIP_SCROLL_SMOOTHNESS
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(
+        name = "Allow Off-Screen Movement",
+        desc = "Let tooltips be moved completely past the screen edges instead of keeping a sliver on screen.",
+    )
+    @field:ConfigEditorBoolean
+    var allowOffScreen = true
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Minimum Zoom", desc = "Smallest tooltip size, in percent.")
+    @field:ConfigEditorSlider(minValue = 25f, maxValue = 100f, minStep = 5f)
+    var minimumZoom = DEFAULT_MINIMUM_TOOLTIP_ZOOM
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Maximum Zoom", desc = "Largest tooltip size, in percent.")
+    @field:ConfigEditorSlider(minValue = 100f, maxValue = 400f, minStep = 5f)
+    var maximumZoom = DEFAULT_MAXIMUM_TOOLTIP_ZOOM
 }
 
 const val MIN_TOOLTIP_SCROLL_SPEED = 1
@@ -163,3 +205,19 @@ const val MIN_TOOLTIP_SCROLL_SMOOTHNESS = 5
 const val MAX_TOOLTIP_SCROLL_SMOOTHNESS = 100
 
 const val DEFAULT_TOOLTIP_SCROLL_SMOOTHNESS = 25
+
+const val MIN_TOOLTIP_ZOOM = 25
+
+const val MAX_TOOLTIP_ZOOM = 400
+
+const val DEFAULT_TOOLTIP_ZOOM = 100
+
+const val DEFAULT_MINIMUM_TOOLTIP_ZOOM = 50
+
+const val DEFAULT_MAXIMUM_TOOLTIP_ZOOM = 300
+
+const val MIN_TOOLTIP_ZOOM_SPEED = 1
+
+const val MAX_TOOLTIP_ZOOM_SPEED = 50
+
+const val DEFAULT_TOOLTIP_ZOOM_SPEED = 10

@@ -85,18 +85,23 @@ object AdjacentTooltipRenderer {
             tooltipWidth: Int,
             tooltipHeight: Int,
         ): Vector2ic {
+            // The main frame is measured in the zoomed tooltip's own coordinates, so the viewport has to be read in
+            // those same coordinates rather than in the screen units the caller hands over.
+            val zoom = TooltipViewport.renderZoom
+            val viewportWidth = (screenWidth / zoom).toInt()
+            val viewportHeight = (screenHeight / zoom).toInt()
             val framedGap = TOOLTIP_MARGIN * 2 + TOOLTIP_GAP
             val right = mainFrame.x + mainFrame.width + framedGap
             val left = mainFrame.x - tooltipWidth - framedGap
             val minimumX = TOOLTIP_MARGIN + SCREEN_EDGE
-            val maximumX = (screenWidth - tooltipWidth - TOOLTIP_MARGIN - SCREEN_EDGE).coerceAtLeast(minimumX)
+            val maximumX = (viewportWidth - tooltipWidth - TOOLTIP_MARGIN - SCREEN_EDGE).coerceAtLeast(minimumX)
             val tooltipX = when {
-                right + tooltipWidth + TOOLTIP_MARGIN <= screenWidth - SCREEN_EDGE -> right
+                right + tooltipWidth + TOOLTIP_MARGIN <= viewportWidth - SCREEN_EDGE -> right
                 left - TOOLTIP_MARGIN >= SCREEN_EDGE -> left
-                screenWidth - mainFrame.x - mainFrame.width >= mainFrame.x -> right.coerceIn(minimumX, maximumX)
+                viewportWidth - mainFrame.x - mainFrame.width >= mainFrame.x -> right.coerceIn(minimumX, maximumX)
                 else -> left.coerceIn(minimumX, maximumX)
             }
-            val maximumY = (screenHeight - tooltipHeight - SCREEN_EDGE).coerceAtLeast(SCREEN_EDGE)
+            val maximumY = (viewportHeight - tooltipHeight - SCREEN_EDGE).coerceAtLeast(SCREEN_EDGE)
             return Vector2i(tooltipX, mainFrame.y.coerceIn(SCREEN_EDGE, maximumY))
         }
     }
