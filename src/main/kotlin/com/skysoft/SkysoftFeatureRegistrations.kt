@@ -74,6 +74,7 @@ import com.skysoft.features.inventory.registerSlotBindingStorage
 import com.skysoft.features.loot.RareLootChatFeatures
 import com.skysoft.features.mining.MiningAbilityCooldownDisplay
 import com.skysoft.features.misc.DayDisplay
+import com.skysoft.features.misc.ForIntrests
 import com.skysoft.features.misc.MouseLock
 import com.skysoft.features.misc.PlayerHeadSkinFix
 import com.skysoft.features.misc.RealTimeDisplay
@@ -103,6 +104,7 @@ import com.skysoft.features.profit.ProfitTracker
 import com.skysoft.features.ravengard.RavengardItemComparisonTooltip
 import com.skysoft.features.ravengard.RavengardLootBagCheckmarks
 import com.skysoft.features.ravengard.RavengardWeaponDpsTooltip
+import com.skysoft.features.safari.HoneybugHelper
 import com.skysoft.features.screenshot.ScreenshotCapturePreview
 import com.skysoft.features.screenshot.ScreenshotManager
 import com.skysoft.features.slayer.BlazeAttunementHighlighting
@@ -257,6 +259,7 @@ internal object SkysoftFeatureRegistrations {
         register("Queen Ant Warning", QueenAntWarning::register)
         register("Throwing Axe Helper", ThrowingAxeHelper::register)
         register("Hide Axe Particles", ThrowingAxeParticleHider::register)
+        register("Honeybug Helper", HoneybugHelper::register)
         register("Rare Loot Features", RareLootChatFeatures::register)
         register("Diana Burrow Storage", DianaBurrowStorage::register)
         register("Diana Burrow Helper", DianaBurrowHelper::register)
@@ -264,6 +267,7 @@ internal object SkysoftFeatureRegistrations {
         register("Diana Lobby Compromised Watcher", DianaLobbyCompromisedWatcher::register)
         register("Diana Rare Mob Sharing", DianaRareMobSharing::register)
         register("Mythological Ritual Tracker", MythologicalRitualTracker::register)
+        register("For Intrests", ForIntrests::register)
         register("New Settings Discovery", NewSettingsDiscovery::register)
         register("Update Checker", ModUpdateChecker::register)
     }
