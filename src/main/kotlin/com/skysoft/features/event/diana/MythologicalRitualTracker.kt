@@ -1,6 +1,7 @@
 package com.skysoft.features.event.diana
 
 import com.skysoft.config.SkysoftConfigGui
+import com.skysoft.data.hypixel.SkyBlockProfileApi
 import com.skysoft.features.loot.RareLootChatParser
 import com.skysoft.features.loot.RareLootChatDrop
 import com.skysoft.features.loot.RareLootContextContributor
@@ -19,6 +20,7 @@ internal object MythologicalRitualTracker {
     private var ticks = 0
 
     fun register() {
+        SkyBlockProfileApi.registerConsumer("Mythological Ritual Tracker", ::isEnabled)
         SkysoftClientEvents.onEndTick(
             "Mythological Ritual Tracker tick",
             isActive = { isEnabled() || ticks > 0 },
@@ -39,7 +41,7 @@ internal object MythologicalRitualTracker {
     }
 
     private fun onTick() {
-        if (!config.enabled) {
+        if (!isEnabled()) {
             clearSession()
             return
         }
@@ -49,7 +51,7 @@ internal object MythologicalRitualTracker {
     }
 
     private fun handleVisibleMessage(message: ChatMessage) {
-        if (!config.enabled || !message.isSystemLike || !DianaEventState.isOnHub()) return
+        if (!isEnabled() || !message.isSystemLike || !DianaEventState.isOnHub()) return
         if (RareLootChatParser.parse(message.cleanText) != null) return
         val now = System.currentTimeMillis()
         MythologicalRitualTrackerRepository.update(now) { state ->
@@ -58,13 +60,14 @@ internal object MythologicalRitualTracker {
     }
 
     private fun handlePartyMessage(message: ChatMessage) {
-        if (!config.enabled) return
+        if (!isEnabled() || !config.partyCommands.enabled) return
         SkysoftPartyShare.markPartyChatObserved()
         val state = MythologicalRitualTrackerRepository.displayStateOrNull() ?: return
         val response = MythologicalRitualPartyCommands.response(
             body = message.body,
             localPlayerName = DianaRareMobRuntime.localPlayerName(),
             state = state,
+            enabledCommands = config.partyCommands.settings.commands.get(),
         ) ?: return
         if (!partyCommandCooldown.canRespond(message.sender?.name, System.currentTimeMillis())) return
         SkysoftPartyShare.sendParty(response, allowRecentPartyChatEvidence = true)
@@ -74,7 +77,7 @@ internal object MythologicalRitualTracker {
         DianaEventState.isOnHub() &&
             (DianaEventState.isMythologicalRitualActive() || DianaEventState.hasSpadeInHotbar())
 
-    private fun isEnabled(): Boolean = config.enabled
+    private fun isEnabled(): Boolean = config.isAnyFeatureEnabled()
 
     private fun clearSession() {
         lootShareWindow.clear()
@@ -84,13 +87,13 @@ internal object MythologicalRitualTracker {
     }
 
     private val rareLootContextContributor = object : RareLootContextContributor {
-        override fun isActive(): Boolean = config.enabled && DianaEventState.isOnHub()
+        override fun isActive(): Boolean = isEnabled() && DianaEventState.isOnHub()
 
         override fun hasLootShareEvidence(now: Long): Boolean =
             DianaRareMobSharing.likelyRemoteRareLoot
 
         override fun recordDrop(drop: RareLootChatDrop, lootshare: Boolean, now: Long): RareLootDropCount? {
-            if (!config.enabled || !DianaEventState.isOnHub()) return null
+            if (!isEnabled() || !DianaEventState.isOnHub()) return null
             val isLootShareDrop = lootshare || lootShareWindow.isActive(now)
             var dropCount: RareLootDropCount? = null
             MythologicalRitualTrackerRepository.update(now) { state ->

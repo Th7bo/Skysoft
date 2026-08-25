@@ -7,7 +7,7 @@ import com.skysoft.data.ProfileStorage
 import java.util.Locale
 
 internal object SkysoftConfigMigrations {
-    const val CURRENT_CONFIG_MIGRATION_VERSION = 14
+    const val CURRENT_CONFIG_MIGRATION_VERSION = 18
 
     fun apply(json: JsonObject, gson: Gson) {
         val migrationVersion = json.get(CONFIG_MIGRATION_VERSION_FIELD)
@@ -17,9 +17,13 @@ internal object SkysoftConfigMigrations {
         importLegacyStorage(json, gson)
         migrateBazaarIntoInventory(json)
         migrateActionBarBackgroundIntoGui(json)
-        migrateDianaSettings(json)
-        migrateRareLootSharingIntoMisc(json)
-        migrateBuggedNameplatesIntoMisc(json)
+        if (migrationVersion < DIANA_FEATURE_ACCORDIONS_VERSION) {
+            migrateDianaSettings(json)
+            migrateRareLootSharingIntoMisc(json)
+            migrateBuggedNameplatesIntoMisc(json)
+            migrateDianaFeatureAccordions(json)
+        }
+        if (migrationVersion < DIANA_AND_TERRAIN_SETTINGS_VERSION) migrateDianaAndTerrainSettings(json)
         migrateOrganizedConfigLayout(json)
         if (migrationVersion < PRICE_TOOLTIP_CUSTOMIZATION_VERSION) {
             migratePriceTooltipCustomization(json)
@@ -414,8 +418,142 @@ internal object SkysoftConfigMigrations {
     private const val MAX_ENCHANT_CHROMA_CATEGORY_VERSION = 11
     private const val SPOTIFY_LYRICS_MODE_VERSION = 12
     private const val SERVER_INFO_METRIC_COLORS_VERSION = 13
+    private const val DIANA_FEATURE_ACCORDIONS_VERSION = 15
+    private const val DIANA_AND_TERRAIN_SETTINGS_VERSION = 18
     private const val SKYBLOCK_MENU_DROP_FIX_FIELD = "preventSkyBlockMenuOpeningOnInventoryDrop"
 }
+
+private fun migrateDianaFeatureAccordions(json: JsonObject) {
+    val dianaJson = json.getObjectOrNull("events")?.getObjectOrNull("diana") ?: return
+    val globallyEnabled = dianaJson.remove("enabled").booleanPrimitiveOrNull()?.asBoolean ?: false
+    val settingsJson = dianaJson.remove("settings")
+        ?.takeIf { it.isJsonObject }
+        ?.asJsonObject
+        ?: JsonObject()
+    val detailsJson = dianaJson.remove("details")
+        ?.takeIf { it.isJsonObject }
+        ?.asJsonObject
+        ?: JsonObject()
+
+    fun feature(name: String, enabled: Boolean): JsonObject =
+        dianaJson.getOrCreateObject(name).also { featureJson ->
+            if (!featureJson.has("enabled")) featureJson.addProperty("enabled", enabled)
+        }
+
+    val burrowHelper = feature("burrowHelper", globallyEnabled)
+    settingsJson.moveFieldsInto(burrowHelper.getOrCreateObject("settings"), DIANA_BURROW_SETTINGS_FIELDS)
+    detailsJson.moveFieldsInto(burrowHelper.getOrCreateObject("details"), DIANA_BURROW_DETAILS_FIELDS)
+
+    val shareMobs = settingsJson.remove("rareMobSharing").booleanPrimitiveOrNull()?.asBoolean ?: true
+    val rareMobSharing = feature("rareMobSharing", globallyEnabled)
+    val rareMobSettings = rareMobSharing.getOrCreateObject("settings")
+    if (!rareMobSettings.has("shareMobs")) rareMobSettings.addProperty("shareMobs", shareMobs)
+    settingsJson.moveFieldsInto(rareMobSettings, DIANA_RARE_MOB_SETTINGS_FIELDS)
+    detailsJson.moveFieldsInto(rareMobSharing.getOrCreateObject("details"), DIANA_RARE_MOB_DETAILS_FIELDS)
+
+    val lobbyCompromised = feature(
+        "lobbyCompromised",
+        globallyEnabled && (settingsJson.remove("lobbyCompromised").booleanPrimitiveOrNull()?.asBoolean ?: true),
+    ).getOrCreateObject("settings")
+    settingsJson.moveFieldInto(lobbyCompromised, "lobbyCompromisedStrangerLimit", "strangerLimit")
+    settingsJson.moveFieldInto(lobbyCompromised, "lobbyCompromisedAlerts", "alerts")
+
+    feature(
+        "sphinxHelper",
+        globallyEnabled && (settingsJson.remove("sphinxAnswers").booleanPrimitiveOrNull()?.asBoolean ?: true),
+    )
+
+    val quickWarps = feature(
+        "quickWarps",
+        globallyEnabled && (settingsJson.remove("warpHint").booleanPrimitiveOrNull()?.asBoolean ?: true),
+    ).getOrCreateObject("settings")
+    settingsJson.moveFieldsInto(quickWarps, DIANA_QUICK_WARP_SETTINGS_FIELDS)
+
+    val keepTerrainLoaded =
+        globallyEnabled && (settingsJson.remove("keepHubTerrainLoaded").booleanPrimitiveOrNull()?.asBoolean ?: true)
+    val miscJson = json.getOrCreateObject("misc")
+    if (!miscJson.has("keepTerrainLoaded")) miscJson.addProperty("keepTerrainLoaded", keepTerrainLoaded)
+}
+
+private fun migrateDianaAndTerrainSettings(json: JsonObject) {
+    json.getObjectOrNull("misc")?.let { miscJson ->
+        val wasEnabled = miscJson.get("keepTerrainLoaded").booleanPrimitiveOrNull()?.asBoolean
+        if (wasEnabled != null) {
+            miscJson.add(
+                "keepTerrainLoaded",
+                JsonObject().also { featureJson -> featureJson.addProperty("enabled", wasEnabled) },
+            )
+        }
+        val islands = miscJson.getObjectOrNull("keepTerrainLoaded")
+            ?.getObjectOrNull("settings")
+            ?.getAsJsonArray("islands")
+        if (islands != null) {
+            for (index in islands.size() - 1 downTo 0) {
+                if (islands[index].asString in NON_PERSISTENT_TERRAIN_ISLANDS) islands.remove(index)
+            }
+        }
+    }
+
+    val diana = json.getObjectOrNull("events")?.getObjectOrNull("diana") ?: return
+    val rareMobSharing = diana.getObjectOrNull("rareMobSharing") ?: return
+    val lootshare = diana.getObjectOrNull("lootshare")
+        ?: rareMobSharing.remove("lootshare")?.takeIf { it.isJsonObject }?.asJsonObject
+        ?: JsonObject()
+    diana.add("lootshare", lootshare)
+    val settings = lootshare.getOrCreateObject("settings")
+    if (!settings.has("shareSecuredMessage")) settings.addProperty("shareSecuredMessage", true)
+    val details = lootshare.getOrCreateObject("details")
+    details.remove("partyCheckmarks")?.let { partyCheckmarks ->
+        if (!settings.has("partyCheckmarks")) settings.add("partyCheckmarks", partyCheckmarks)
+    }
+    if (!settings.has("partyCheckmarks")) settings.addProperty("partyCheckmarks", true)
+    rareMobSharing.getObjectOrNull("settings")?.moveFieldsInto(details, listOf("lootshareRadius"))
+    rareMobSharing.getObjectOrNull("details")?.let { legacyDetails ->
+        legacyDetails.moveFieldsInto(details, listOf("lootshareMissingColor", "lootshareReadyColor"))
+        if (legacyDetails.size() == 0) rareMobSharing.remove("details")
+    }
+
+    val partyCommands = diana.getOrCreateObject("partyCommands")
+    if (!partyCommands.has("enabled")) {
+        val wasEnabled = listOf("burrowHelper", "rareMobSharing", "lobbyCompromised", "sphinxHelper", "quickWarps")
+            .any { feature -> diana.getObjectOrNull(feature)?.get("enabled").booleanPrimitiveOrNull()?.asBoolean == true }
+        partyCommands.addProperty("enabled", wasEnabled)
+    }
+}
+
+private fun JsonObject.moveFieldsInto(target: JsonObject, fieldNames: List<String>) {
+    fieldNames.forEach { fieldName -> moveFieldInto(target, fieldName, fieldName) }
+}
+
+private fun JsonObject.moveFieldInto(target: JsonObject, fieldName: String, targetName: String) {
+    val value = remove(fieldName) ?: return
+    if (!target.has(targetName)) target.add(targetName, value.deepCopy())
+}
+
+private fun com.google.gson.JsonElement?.booleanPrimitiveOrNull(): com.google.gson.JsonPrimitive? =
+    this?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asJsonPrimitive
+
+private val NON_PERSISTENT_TERRAIN_ISLANDS = setOf(
+    "PRIVATE_ISLANDS",
+    "KUUDRA",
+    "DUNGEONS",
+    "GLACITE_MINESHAFTS",
+)
+private val DIANA_BURROW_SETTINGS_FIELDS = listOf("crosshairLine", "clickCounter", "clickCounterPosition")
+private val DIANA_BURROW_DETAILS_FIELDS = listOf(
+    "boldText",
+    "hideGuessArrows",
+    "burrowBoxColorMode",
+    "burrowBoxColor",
+    "labelFormat",
+    "startTextColor",
+    "mobTextColor",
+    "treasureTextColor",
+    "guessTextColor",
+)
+private val DIANA_RARE_MOB_SETTINGS_FIELDS = listOf("sharedRareMobs", "receivedRareMobs", "lootshareRadius")
+private val DIANA_RARE_MOB_DETAILS_FIELDS = listOf("lootshareMissingColor", "lootshareReadyColor")
+private val DIANA_QUICK_WARP_SETTINGS_FIELDS = listOf("warpKey", "minWarpSavings")
 
 private const val CURSOR_POSITION_PRESERVATION_CATEGORY_VERSION = 14
 
