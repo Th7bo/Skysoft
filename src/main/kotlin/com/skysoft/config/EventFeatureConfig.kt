@@ -2,6 +2,7 @@ package com.skysoft.config
 
 import com.google.gson.annotations.Expose
 import com.skysoft.config.core.ConfigRepairable
+import com.skysoft.features.event.diana.DianaWarpPoint
 import io.github.notenoughupdates.moulconfig.ChromaColour
 import io.github.notenoughupdates.moulconfig.annotations.Accordion
 import io.github.notenoughupdates.moulconfig.annotations.Category
@@ -43,7 +44,7 @@ class SkysoftDianaConfig {
 
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Lootshare", desc = "Configure lootshare messages and indicators.")
+    @field:ConfigOption(name = "Lootshare Helper", desc = "Track lootshare damage and show nearby indicators.")
     @field:Accordion
     val lootshare = DianaLootshareConfig()
 
@@ -74,6 +75,7 @@ class SkysoftDianaConfig {
     fun isAnyFeatureEnabled(): Boolean =
         burrowHelper.enabled ||
             rareMobSharing.enabled ||
+            lootshare.enabled ||
             (partyCommands.enabled && partyCommands.settings.commands.get().isNotEmpty()) ||
             lobbyCompromised.enabled ||
             sphinxHelper.enabled ||
@@ -234,13 +236,20 @@ class DianaRareMobSharingSettingsConfig {
 class DianaLootshareConfig {
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Settings", desc = "Lootshare settings.")
+    @field:ConfigOption(name = "Enabled", desc = "Track lootshare damage and show nearby indicators.")
+    @field:MainFeatureToggle
+    @field:ConfigEditorBoolean
+    var enabled = false
+
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Settings", desc = "Lootshare Helper settings.")
     @field:Accordion
     val settings = DianaLootshareSettingsConfig()
 
     @JvmField
     @field:Expose
-    @field:ConfigOption(name = "Details", desc = "Lootshare appearance.")
+    @field:ConfigOption(name = "Details", desc = "Lootshare Helper appearance.")
     @field:Accordion
     val details = DianaLootshareDetailsConfig()
 }
@@ -373,6 +382,13 @@ class DianaQuickWarpsConfig {
 }
 
 class DianaQuickWarpsSettingsConfig {
+    @JvmField
+    @field:Expose
+    @field:ConfigOption(name = "Warps", desc = "Fast travel destinations Skysoft may suggest.")
+    @field:ConfigEditorDraggableList
+    val warps: Property<MutableList<DianaWarpPoint>> =
+        Property.of(DianaWarpPoint.defaultEnabled.toMutableList())
+
     @JvmField
     @field:Expose
     @field:ConfigOption(name = "Warp Key", desc = "Press this key to use the suggested warp.")
