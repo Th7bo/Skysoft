@@ -76,8 +76,19 @@ internal object DianaRareMobSharing {
         get() = targets.isNotEmpty() || pendingLocalSpawns.isNotEmpty() ||
             pendingLocalClears.isNotEmpty() || pendingRemoteClears.isNotEmpty()
 
-    fun hasActiveTarget(): Boolean =
-        targets.isNotEmpty()
+    val hasActiveTarget: Boolean
+        get() = targets.isNotEmpty()
+
+    val activeSpawnerNames: Set<String>
+        get() = targets.values.mapTo(mutableSetOf()) { target -> target.sharedBy.name }
+
+    fun remoteMobSharedBy(playerName: String): DianaRareMobOption? =
+        targets.values
+            .asSequence()
+            .filter { target -> target.source == DianaRareMobTargetSource.REMOTE }
+            .filter { target -> target.sharedBy.name.equals(playerName, ignoreCase = true) }
+            .maxWithOrNull(compareBy<DianaRareMobTarget> { it.createdAtMillis }.thenBy { it.targetId })
+            ?.mob
 
     val likelyRemoteRareLoot: Boolean
         get() = targets.values.any { target -> target.source == DianaRareMobTargetSource.REMOTE } &&
@@ -232,6 +243,7 @@ internal object DianaRareMobSharing {
             .forEach { target -> clearTarget(target, "cocooned", broadcast = false) }
 
         SkysoftPartyShare.sendParty(DianaRareMobShareParser.formatCocoon(cocoon.mob))
+        if (settings.ownMobAlerts) DianaRareMobTitleRenderer.showOwnCocoon(cocoon.mob)
         if (location == null) return
         val sender = ChatMessageSender(localPlayerName, null)
         val share = DianaRareMobShare(cocoon.mob, location)
@@ -319,6 +331,7 @@ internal object DianaRareMobSharing {
         val sender = ChatMessageSender(localPlayerName, null)
         val share = DianaRareMobShare(pending.mob, signal.location.roundToBlock())
         rememberShare(share, sender, DianaRareMobTargetSource.LOCAL, signal, now)
+        if (settings.ownMobAlerts) DianaRareMobTitleRenderer.showOwn(pending.mob)
         SkysoftPartyShare.sendParty(DianaRareMobShareParser.format(share))
         return LocalRareMobShareResult.SHARED
     }
@@ -417,6 +430,7 @@ internal object DianaRareMobSharing {
             DianaLootshareReadyMarkers.renderWorld(
                 context,
                 DianaRareMobRuntime.localPlayerName(),
+                activeSpawnerNames,
                 System.currentTimeMillis(),
             )
         }
