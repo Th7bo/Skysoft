@@ -43,7 +43,6 @@ import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 
 private val partyDisplayConfig get() = SkysoftConfigGui.config().gui.partyDisplay
-private val title = Component.literal("Party").withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD)
 private val cancelLabel = Component.literal("[Cancel]").withStyle(ChatFormatting.RED)
 private val confirmLabel = Component.literal("[Confirm]").withStyle(ChatFormatting.GREEN)
 private var hoveredControl: OverlayControlArea<PartyDisplayControl>? = null
@@ -254,6 +253,11 @@ private class PartyDisplayRenderable(
     private val controls: PartyDisplayHudControls,
 ) : GuiRenderable {
     private val font get() = Minecraft.getInstance().font
+    private val title = Component.literal("Party").withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD)
+        .append(
+            Component.literal(" (${members.count { !it.invited && it.leavingAtMillis == null }})")
+                .withStyle(ChatFormatting.GRAY),
+        )
     private val renderedAtMillis = System.currentTimeMillis()
     private val padding = if (background) OverlayPanelStyle.PADDING else 0
     private val commands = buildList {
@@ -323,12 +327,17 @@ private class PartyDisplayRenderable(
 
     private fun renderMember(context: GuiGraphicsExtractor, member: PartyDisplayMember, x: Int, y: Int) {
         val opacity = memberOpacity(member)
-        val faceColor = (if (member.invited) INVITED_MEMBER_COLOR else TEXT_COLOR).withScaledAlpha(opacity)
+        val inactive = member.invited || member.disconnected
+        val faceColor = (if (inactive) INACTIVE_MEMBER_COLOR else TEXT_COLOR).withScaledAlpha(opacity)
+        val name = displayName(member)
+        val rightAligned = alignment == PartyDisplayAlignment.RIGHT
+        val faceX = if (rightAligned) x + memberWidth - HEAD_SIZE else x
+        val nameX = if (rightAligned) faceX - HEAD_GAP - font.width(name) else faceX + HEAD_SIZE + HEAD_GAP
         PartyDisplay.face(member)?.let { face ->
             PlayerFaceExtractor.extractRenderState(
                 context,
                 face.texture,
-                x,
+                faceX,
                 y,
                 HEAD_SIZE,
                 face.showHat,
@@ -336,21 +345,19 @@ private class PartyDisplayRenderable(
                 faceColor,
             )
         }
-        val nameX = x + HEAD_SIZE + HEAD_GAP
-        val name = displayName(member)
         context.text(
             font,
-            if (member.invited) invitedName(name) else name,
+            if (inactive) animatedName(name) else name,
             nameX,
             y,
             TEXT_COLOR.withScaledAlpha(opacity),
             true,
         )
-        lootshareCheckmarks[member.name.lowercase()]?.takeIf { !member.invited }?.let { checkmark ->
+        lootshareCheckmarks[member.name.lowercase()]?.takeIf { !inactive }?.let { checkmark ->
             context.text(
                 font,
                 checkmark,
-                nameX + usernameWidth + STATUS_GAP,
+                if (rightAligned) x else nameX + usernameWidth + STATUS_GAP,
                 y,
                 TEXT_COLOR.withScaledAlpha(opacity),
                 true,
@@ -368,17 +375,17 @@ private class PartyDisplayRenderable(
         return Component.literal(name).withStyle(member.component.style)
     }
 
-    private fun invitedName(name: Component): Component {
+    private fun animatedName(name: Component): Component {
         val text = name.string
         val rgb = name.style.color?.value ?: (TEXT_COLOR and RGB_MASK)
-        val progress = System.currentTimeMillis() % INVITE_WAVE_DURATION_MILLIS /
-            INVITE_WAVE_DURATION_MILLIS.toDouble()
-        val wavePosition = -1 - INVITE_WAVE_RADIUS +
-            progress * (text.length + INVITE_WAVE_RADIUS * 2)
+        val progress = System.currentTimeMillis() % INACTIVE_WAVE_DURATION_MILLIS /
+            INACTIVE_WAVE_DURATION_MILLIS.toDouble()
+        val wavePosition = -1 - INACTIVE_WAVE_RADIUS +
+            progress * (text.length + INACTIVE_WAVE_RADIUS * 2)
         return Component.empty().also { result ->
             text.forEachIndexed { index, character ->
-                val strength = (1 - abs(index - wavePosition) / INVITE_WAVE_RADIUS).coerceIn(0.0, 1.0)
-                val brightness = INVITE_BASE_BRIGHTNESS + strength * (1 - INVITE_BASE_BRIGHTNESS)
+                val strength = (1 - abs(index - wavePosition) / INACTIVE_WAVE_RADIUS).coerceIn(0.0, 1.0)
+                val brightness = INACTIVE_BASE_BRIGHTNESS + strength * (1 - INACTIVE_BASE_BRIGHTNESS)
                 val red = (((rgb shr RED_SHIFT) and COLOR_CHANNEL_MASK) * brightness).roundToInt()
                 val green = (((rgb shr GREEN_SHIFT) and COLOR_CHANNEL_MASK) * brightness).roundToInt()
                 val blue = ((rgb and COLOR_CHANNEL_MASK) * brightness).roundToInt()
@@ -692,10 +699,10 @@ private const val MEMBER_PANEL_WIDTH = 130
 private const val MEMBER_PANEL_ROWS = 3
 private const val MEMBER_PANEL_GAP = 4
 private const val TEXT_COLOR = 0xFFFFFFFF.toInt()
-private const val INVITED_MEMBER_COLOR = 0x80FFFFFF.toInt()
-private const val INVITE_WAVE_DURATION_MILLIS = 2_000L
-private const val INVITE_WAVE_RADIUS = 2.5
-private const val INVITE_BASE_BRIGHTNESS = 0.5
+private const val INACTIVE_MEMBER_COLOR = 0x80FFFFFF.toInt()
+private const val INACTIVE_WAVE_DURATION_MILLIS = 2_000L
+private const val INACTIVE_WAVE_RADIUS = 2.5
+private const val INACTIVE_BASE_BRIGHTNESS = 0.5
 private const val RED_SHIFT = 16
 private const val GREEN_SHIFT = 8
 private const val COLOR_CHANNEL_MASK = 0xFF

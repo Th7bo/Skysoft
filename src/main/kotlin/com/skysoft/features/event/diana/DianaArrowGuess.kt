@@ -35,18 +35,11 @@ internal object DianaArrowGuess {
         val distanceHint = DianaParticleClassifier.arrowDistance(event) ?: return
         val ray = detectors.getOrPut(distanceHint) { DianaArrowShapeDetector() }
             .add(event.location, distanceHint, now) ?: return
-        val pending = pendingRay(ray, session.anchor, ray.resolveCandidates(HUB_BOUNDS)) ?: return
+        if (!ray.isFromAnchor(session.anchor)) return
+        val candidates = DianaArrowCandidateResolver.resolve(ray, dianaHubBounds)
+        if (candidates.isEmpty()) return
         pendingSession = null
-        trackPendingRay(pending, session.anchor, now, session.progress)
-    }
-
-    private fun pendingRay(
-        ray: DianaArrowRay,
-        anchor: WorldVec,
-        candidates: List<ResolvedArrowCandidate>,
-    ): PendingArrowRay? {
-        if (!ray.isFromAnchor(anchor) || candidates.isEmpty()) return null
-        return PendingArrowRay(ray, candidates)
+        trackResolvedCandidates(candidates, now, session.progress)
     }
 
     fun prune(now: Long = System.currentTimeMillis()) {
@@ -70,9 +63,9 @@ internal object DianaArrowGuess {
             }
         val bestMatch = matches.bestConfirmMatch() ?: return null
         if (matches.size > 1) {
-            activeSequences.invalidateAmbiguousNonWinners(bestMatch, matches)
+            activeSequences.invalidateAmbiguousNonWinners(bestMatch, matches, now)
         }
-        activeSequences.confirmMatch(bestMatch, detected, now)
+        activeSequences.confirmMatch(bestMatch, now)
         return bestMatch.currentGuess
     }
 
@@ -132,8 +125,13 @@ internal object DianaArrowGuess {
                             candidate.location.distance(target.location) > skipCandidatesNearRejectedRadius
                         )
             }
-        for ((index, candidate) in nextCandidates) {
-            val next = DianaBurrowTargetTracker.trackGuess(candidate.location, now) ?: continue
+        for ((remainingIndex, indexedCandidate) in nextCandidates.withIndex()) {
+            val (index, candidate) = indexedCandidate
+            val next = DianaBurrowTargetTracker.trackGuess(
+                location = candidate.location,
+                now = now,
+                candidates = nextCandidates.drop(remainingIndex).map { (_, remaining) -> remaining.location },
+            ) ?: continue
             DianaBurrowChainState.onTargetReplaced(target, next, now)
             activeSequences.remove(target.targetId)
             activeSequences[next.targetId] = sequence.copy(
@@ -154,6 +152,28 @@ internal object DianaArrowGuess {
         activeSequences.clear()
     }
 
+    fun restoreSequences(targets: List<DianaBurrowTarget>, now: Long) {
+        activeSequences.clear()
+        nextSequenceId = 0L
+        targets
+            .filter { target -> target.source == DianaBurrowSource.GUESS }
+            .forEach { target ->
+                val candidates = target.guessCandidates
+                    .ifEmpty { listOf(target.location) }
+                    .map { location -> location.toRestoredCandidate() }
+                activeSequences[target.targetId] = ArrowCandidateSequence(
+                    sequenceId = ++nextSequenceId,
+                    targetId = target.targetId,
+                    candidates = candidates,
+                    current = candidates.first(),
+                    currentIndex = 0,
+                    currentTrackedAtMillis = now,
+                    invalidatedBlockKeys = emptySet(),
+                    missingParticlesFirstCheckAtMillis = null,
+                )
+            }
+    }
+
     fun clearDetection() {
         detectors.clear()
         pendingSession = null
@@ -165,15 +185,14 @@ internal object DianaArrowGuess {
         playerLocation: WorldVec?,
         particlesShouldBeVisible: Boolean,
         now: Long = System.currentTimeMillis(),
-        hasRecentBurrowNear: (WorldVec) -> Boolean = { location ->
-            DianaBurrowParticleDetector.hasRecentBurrowNear(location, CURRENT_GUESS_CONFIRM_RADIUS, now)
+        hasRecentBurrowAt: (WorldVec) -> Boolean = { location ->
+            DianaBurrowParticleDetector.hasRecentBurrowAt(location, now)
         },
     ): ArrowGuessActionResult {
         if (!particlesShouldBeVisible || playerLocation == null) return ArrowGuessActionResult.IGNORED
         var result = ArrowGuessActionResult.IGNORED
         activeSequences.values.toList().forEach { sequence ->
             val target = activeSequences.currentGuessForSequence(sequence.targetId, sequence) ?: return@forEach
-            if (DianaBurrowInteractions.hasPendingClick(target)) return@forEach
             val rejectionCandidates = sequence.candidates
                 .withIndex()
                 .drop(sequence.currentIndex)
@@ -181,7 +200,7 @@ internal object DianaArrowGuess {
                 .filter { (_, candidate) ->
                     candidate.location.blockCenter().distance(playerLocation) <= MISSING_BURROW_PARTICLES_RADIUS
                 }
-                .filter { (_, candidate) -> !hasRecentBurrowNear(candidate.location) }
+                .filter { (_, candidate) -> !hasRecentBurrowAt(candidate.location) }
             if (rejectionCandidates.isEmpty()) {
                 activeSequences[sequence.targetId] = sequence.copy(missingParticlesFirstCheckAtMillis = null)
                 return@forEach
@@ -206,26 +225,24 @@ internal object DianaArrowGuess {
     internal fun trackResolvedCandidates(
         candidates: List<ResolvedArrowCandidate>,
         now: Long,
-        distanceHint: DianaArrowDistance? = null,
         progress: DianaBurrowProgress? = null,
     ): DianaBurrowTarget? {
         pruneExpiredSequences()
-        val orderedCandidates = DianaArrowCandidateResolver.rank(candidates, distanceHint)
-        if (orderedCandidates.isEmpty()) return null
-        for ((index, candidate) in orderedCandidates.withIndex()) {
-            val target = DianaBurrowTargetTracker.trackGuess(candidate.location, now) ?: continue
+        for ((index, candidate) in candidates.withIndex()) {
+            val target = DianaBurrowTargetTracker.trackGuess(
+                location = candidate.location,
+                now = now,
+                candidates = candidates.drop(index).map { remaining -> remaining.location },
+            ) ?: continue
             if (target.source == DianaBurrowSource.GUESS) {
                 val sequenceId = ++nextSequenceId
                 activeSequences[target.targetId] = ArrowCandidateSequence(
                     sequenceId = sequenceId,
                     targetId = target.targetId,
-                    candidates = orderedCandidates,
+                    candidates = candidates,
                     current = candidate,
                     currentIndex = index,
-                    distanceHint = distanceHint,
-                    createdAtMillis = now,
                     currentTrackedAtMillis = now,
-                    firstGuess = target.location,
                     invalidatedBlockKeys = emptySet(),
                     missingParticlesFirstCheckAtMillis = null,
                 )
@@ -246,10 +263,12 @@ internal object DianaArrowGuess {
         val currentRejected = target.location.blockKey() in rejectedKeys
         val invalidatedKeys = sequence.invalidatedBlockKeys + rejectedKeys
         if (!currentRejected) {
-            activeSequences[sequence.targetId] = sequence.copy(
+            val updated = sequence.copy(
                 invalidatedBlockKeys = invalidatedKeys,
                 missingParticlesFirstCheckAtMillis = null,
             )
+            activeSequences[sequence.targetId] = updated
+            DianaBurrowTargetTracker.updateGuessCandidates(target, updated.remainingCandidates(), now)
             return ArrowGuessActionResult.HANDLED
         }
         DianaBurrowInteractions.hasPendingClick(target, clear = true)
@@ -258,8 +277,13 @@ internal object DianaArrowGuess {
             .withIndex()
             .drop(sequence.currentIndex + 1)
             .filter { (_, candidate) -> candidate.location.blockKey() !in invalidatedKeys }
-        for ((index, candidate) in nextCandidates) {
-            val next = DianaBurrowTargetTracker.trackGuess(candidate.location, now) ?: continue
+        for ((remainingIndex, indexedCandidate) in nextCandidates.withIndex()) {
+            val (index, candidate) = indexedCandidate
+            val next = DianaBurrowTargetTracker.trackGuess(
+                location = candidate.location,
+                now = now,
+                candidates = nextCandidates.drop(remainingIndex).map { (_, remaining) -> remaining.location },
+            ) ?: continue
             DianaBurrowChainState.onTargetReplaced(target, next, now)
             activeSequences.remove(target.targetId)
             activeSequences[next.targetId] = sequence.copy(
@@ -282,16 +306,6 @@ internal object DianaArrowGuess {
         pendingSession = null
     }
 
-    private fun trackPendingRay(
-        pending: PendingArrowRay,
-        anchor: WorldVec,
-        now: Long,
-        progress: DianaBurrowProgress?,
-    ): DianaBurrowTarget? {
-        if (!pending.ray.isFromAnchor(anchor)) return null
-        return trackResolvedCandidates(pending.candidates, now, pending.ray.distanceHint, progress)
-    }
-
     private fun pruneExpiredSequences() {
         activeSequences.entries.removeIf { (_, sequence) ->
             DianaBurrowTargetTracker.targetAt(sequence.current.location)?.targetId != sequence.targetId
@@ -300,7 +314,7 @@ internal object DianaArrowGuess {
 
     internal fun handleLoadedInvalidSequences(
         now: Long,
-        checkSurface: (WorldVec) -> DianaBurrowSurfaceCheck = DianaBurrowSurfaceValidator::check,
+        checkSurface: (WorldVec) -> DianaBurrowSurfaceStatus = DianaBurrowSurfaceValidator::check,
     ): ArrowGuessActionResult {
         var result = ArrowGuessActionResult.IGNORED
         var advanced: Boolean
@@ -311,8 +325,7 @@ internal object DianaArrowGuess {
                 if (target.targetId != sequence.targetId || target.source != DianaBurrowSource.GUESS) return@forEach
                 if (DianaNonSpadeGuessBreaks.hasRecentBreakAttempt(target, now)) return@forEach
                 if (DianaBurrowInteractions.hasPendingClick(target)) return@forEach
-                val surface = checkSurface(target.location)
-                if (surface.status != DianaBurrowSurfaceStatus.INVALID) return@forEach
+                if (checkSurface(target.location) != DianaBurrowSurfaceStatus.INVALID) return@forEach
                 val rejection = handleRejectedGuess(target, now)
                 if (rejection == ArrowGuessActionResult.HANDLED) {
                     advanced = true
@@ -339,22 +352,16 @@ internal object DianaArrowGuess {
         val progress: DianaBurrowProgress?,
     )
 
-    internal data class PendingArrowRay(
-        val ray: DianaArrowRay,
-        val candidates: List<ResolvedArrowCandidate>,
-    )
-
     private const val ARROW_COLLECTION_WINDOW_MILLIS = 3_000L
     private const val CROSS_SIGNAL_REPLACEMENT_MILLIS = 10_000L
     private const val BURROW_PARTICLE_VISIBILITY_MILLIS = 1_000L
     private const val MISSING_BURROW_PARTICLES_SECOND_CHECK_MILLIS = 500L
-    private const val MISSING_BURROW_PARTICLES_RADIUS = 22.0
+    private const val MISSING_BURROW_PARTICLES_RADIUS = 30.0
     private const val CURRENT_GUESS_CLEAR_RADIUS = 50.0
-    private val HUB_BOUNDS = DianaArrowBounds(
-        min = WorldVec(-283.0, 0.0, -208.0),
-        max = WorldVec(175.0, 256.0, 205.0),
-    )
 }
+
+private fun WorldVec.toRestoredCandidate(): ResolvedArrowCandidate =
+    ResolvedArrowCandidate(roundToBlock(), 0.0)
 
 internal fun DianaArrowRay.isFromAnchor(anchor: WorldVec): Boolean =
     origin.roundToBlock() == anchor.roundToBlock()
