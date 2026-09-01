@@ -1,5 +1,6 @@
 package com.skysoft.features.profit
 
+import com.skysoft.data.skyblock.pets.PetRepository
 import com.skysoft.config.ProfitTrackerConfig
 import com.skysoft.config.ProfitTrackerPriceSource
 import com.skysoft.config.ProfitTrackerQuantityPosition
@@ -9,7 +10,6 @@ import com.skysoft.data.ProfileStorage
 import com.skysoft.data.hypixel.HypixelLocationState
 import com.skysoft.data.skyblock.SkyBlockDataRepository
 import com.skysoft.features.inventory.InventoryOverlayInput
-import com.skysoft.features.pets.PetRepository
 import com.skysoft.features.slayer.SlayerTimeToKill
 import com.skysoft.features.slayer.formatSlayerKillTimeForHud
 import com.skysoft.gui.GuiOverlay
@@ -21,17 +21,19 @@ import com.skysoft.gui.HudEditorRegistry
 import com.skysoft.gui.OverlayControlArea
 import com.skysoft.gui.OverlayControlMouse
 import com.skysoft.gui.OverlayControlTooltips
+import com.skysoft.utils.gui.OverlayItemRowStyle
 import com.skysoft.utils.gui.OverlayPanelStyle
 import com.skysoft.utils.gui.OverlayTextStyle
 import com.skysoft.utils.gui.Rect
 import com.skysoft.utils.input.InputHandlingResult
+import com.skysoft.utils.input.InputUtilities
 import com.skysoft.gui.tooltip.SkysoftNativeTooltip
 import com.skysoft.utils.ColorUtilities.withScaledAlpha
+import com.skysoft.utils.DurationParts
 import com.skysoft.utils.MinecraftClient
 import com.skysoft.utils.NumberUtilities.addSeparators
 import com.skysoft.utils.NumberUtilities.coinFormat
 import com.skysoft.utils.NumberUtilities.signedCoinFormat
-import com.skysoft.utils.SkysoftErrorBoundary
 import com.skysoft.utils.TextUtilities.truncateLegacyText
 import com.skysoft.utils.render.LegacyTextRenderer
 import com.skysoft.utils.renderables.GuiRenderable
@@ -40,13 +42,11 @@ import com.skysoft.utils.renderables.renderAt
 import com.skysoft.utils.renderables.withIsolatedPose
 import kotlin.math.floor
 import kotlin.math.roundToInt
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
-import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents
-import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.client.input.CharacterEvent
+import net.minecraft.client.input.KeyEvent
 import net.minecraft.world.item.ItemStack
 
 private var hoveredControl: ProfitTrackerHoveredControl? = null
@@ -62,6 +62,16 @@ private val inventoryProfitRenderables = mutableMapOf<ProfitTrackerTarget, Profi
 
 object ProfitTrackerHudInput {
     @JvmStatic
+    fun handleKeyPress(event: KeyEvent): InputHandlingResult {
+        val target = itemPanelTarget?.takeIf { it.isVisible() } ?: return InputHandlingResult.IGNORED
+        return if (hudControls.wasKeyPressHandled(target, event)) {
+            InputHandlingResult.CONSUMED
+        } else {
+            InputHandlingResult.IGNORED
+        }
+    }
+
+    @JvmStatic
     fun handleCharTyped(event: CharacterEvent): InputHandlingResult =
         if (itemPanelTarget?.takeIf { it.isVisible() } != null && hudControls.wasCharTypedHandled(event)) {
             InputHandlingResult.CONSUMED
@@ -72,8 +82,12 @@ object ProfitTrackerHudInput {
 
 internal fun registerProfitTrackerHud() {
     registerMouseCapture()
-    ProfitTrackerPreset.entries.map(ProfitTrackerTarget::preset).forEach(::registerProfitTrackerHudEditor)
-    customTrackerTargets().forEach(::registerProfitTrackerHudEditor)
+    ProfitTrackerPreset.entries.map(ProfitTrackerTarget::preset).forEach { target ->
+        HudEditorRegistry.register(profitTrackerHudEditorElement(target))
+    }
+    HudEditorRegistry.registerProvider("custom_profit_trackers") {
+        customTrackerTargets().map(::profitTrackerHudEditorElement)
+    }
     GuiOverlayRegistry.register(
         GuiOverlay(
             id = "profit_tracker",
@@ -85,9 +99,9 @@ internal fun registerProfitTrackerHud() {
     )
 }
 
-internal fun registerProfitTrackerHudEditor(target: ProfitTrackerTarget) {
+private fun profitTrackerHudEditorElement(target: ProfitTrackerTarget): HudEditorElement {
     val config = target.config
-    HudEditorRegistry.register(object : HudEditorElement {
+    return object : HudEditorElement {
         override val id: String = "profit_tracker_${target.storageKey.lowercase()}"
         override val label: String get() = "${target.displayName} Profit Tracker"
         override val position get() = config.position
@@ -98,7 +112,7 @@ internal fun registerProfitTrackerHudEditor(target: ProfitTrackerTarget) {
         override fun renderEditor(context: GuiGraphicsExtractor) = buildProfitRenderable(target, false).render(context)
         override fun openConfig() = target.customId?.let(CustomProfitTrackerConfigScreen::open)
             ?: SkysoftConfigGui.open(target.displayName)
-    })
+    }
 }
 
 private fun renderProfitTracker(context: GuiGraphicsExtractor) {
@@ -122,9 +136,7 @@ private fun renderProfitTracker(context: GuiGraphicsExtractor) {
     hoveredControl = null
     hoveredTracker = null
     isTrackerHovered = false
-    val window = minecraft.window
-    val mouseX = minecraft.mouseHandler.getScaledXPos(window).toInt()
-    val mouseY = minecraft.mouseHandler.getScaledYPos(window).toInt()
+    val (mouseX, mouseY) = InputUtilities.scaledMousePosition(minecraft)
     val (normalMouseX, normalMouseY) = OverlayControlMouse.normalPoint(mouseX, mouseY)
     val (screenMouseX, screenMouseY) = OverlayControlMouse.screenPoint(mouseX, mouseY)
     val interactive = inventoryScreen != null &&
@@ -274,32 +286,23 @@ private fun buildProfitRenderable(target: ProfitTrackerTarget, inventoryOpen: Bo
 }
 
 private fun registerMouseCapture() {
-    ScreenEvents.BEFORE_INIT.register { _, screen, _, _ ->
-        if (!SkysoftConfigGui.config().profitTrackers.isAnyEnabled() || screen !is AbstractContainerScreen<*>) return@register
-        ScreenMouseEvents.allowMouseClick(screen).register { _, click ->
-            SkysoftErrorBoundary.value("Profit Tracker mouse click", true) {
-                val hovered = hoveredControl
-                val target = hovered?.target ?: itemPanelTarget
-                if (target != null && hovered?.area?.action.usesItemPanel()) selectItemPanelTarget(target)
-                InventoryOverlayInput.isPointCovered(screen, click.x(), click.y()) ||
-                    target == null || !target.isVisible() ||
-                    !hudControls.wasClickHandled(screen, target, hovered?.area?.action, click.button())
-            }
-        }
-        ScreenMouseEvents.allowMouseScroll(screen).register { _, mouseX, mouseY, _, verticalAmount ->
-            SkysoftErrorBoundary.value("Profit Tracker mouse scroll", true) {
-                InventoryOverlayInput.isPointCovered(screen, mouseX, mouseY) ||
-                    itemPanelTarget?.takeIf { it.isVisible() } == null && hoveredTracker == null ||
-                    itemPanelTarget?.let { itemPanel.wasSearchScrollHandled(it, verticalAmount) } != true &&
-                    (!isTrackerHovered || !wasItemScrollHandled(verticalAmount))
-            }
-        }
-        ScreenKeyboardEvents.allowKeyPress(screen).register { _, event ->
-            SkysoftErrorBoundary.value("Profit Tracker key input", true) {
-                val target = itemPanelTarget
-                target == null || !target.isVisible() || !hudControls.wasKeyPressHandled(target, event)
-            }
-        }
+    val isActive = { SkysoftConfigGui.config().profitTrackers.isAnyEnabled() }
+    InventoryOverlayInput.registerClickHandler("Profit Tracker mouse click", isActive) { screen, click ->
+        val hovered = hoveredControl
+        val target = hovered?.target ?: itemPanelTarget
+        if (target != null && hovered?.area?.action.usesItemPanel()) selectItemPanelTarget(target)
+        val allowed = InventoryOverlayInput.isPointCovered(screen, click.x(), click.y()) ||
+            target == null || !target.isVisible() ||
+            !hudControls.wasClickHandled(screen, target, hovered?.area?.action, click.button())
+        if (allowed) InputHandlingResult.IGNORED else InputHandlingResult.CONSUMED
+    }
+    InventoryOverlayInput.registerScrollHandler("Profit Tracker mouse scroll", isActive) {
+            screen, mouseX, mouseY, verticalAmount ->
+        val allowed = InventoryOverlayInput.isPointCovered(screen, mouseX, mouseY) ||
+            itemPanelTarget?.takeIf { it.isVisible() } == null && hoveredTracker == null ||
+            itemPanelTarget?.let { itemPanel.wasSearchScrollHandled(it, verticalAmount) } != true &&
+            (!isTrackerHovered || !wasItemScrollHandled(verticalAmount))
+        if (allowed) InputHandlingResult.IGNORED else InputHandlingResult.CONSUMED
     }
 }
 
@@ -457,18 +460,20 @@ private class ProfitTrackerRenderable(
         line.leading?.let {
             LegacyTextRenderer.draw(context, it, padding, y + line.textYOffset, defaultColor = textColor)
         }
-        line.icon?.let { ItemIconRenderable(it, ICON_SCALE).renderAt(context, padding + line.contentOffset, y) }
+        line.icon?.let {
+            ItemIconRenderable(it, OverlayItemRowStyle.ICON_SCALE).renderAt(context, padding + line.contentOffset, y)
+        }
         val textX = if (line.centered) {
             (width - LegacyTextRenderer.width(line.left)) / 2
         } else {
-            padding + line.contentOffset + if (line.icon == null) 0 else ITEM_TEXT_OFFSET
+            padding + line.contentOffset + if (line.icon == null) 0 else OverlayItemRowStyle.ICON_TEXT_OFFSET
         }
         LegacyTextRenderer.draw(context, line.left, textX, y + line.textYOffset, defaultColor = textColor)
         line.middle?.let { middle ->
             LegacyTextRenderer.draw(
                 context,
                 middle,
-                textX + line.leftColumnWidth + ITEM_COLUMN_GAP,
+                textX + line.leftColumnWidth + OverlayItemRowStyle.QUANTITY_COLUMN_GAP,
                 y + line.textYOffset,
                 defaultColor = textColor,
             )
@@ -490,12 +495,13 @@ private class ProfitTrackerRenderable(
     private fun buildLines(): List<ProfitLine> = buildList {
         val itemRows = displayedItems.map { item -> item to item.name.truncateLegacyText(MAXIMUM_ITEM_NAME_LENGTH) }
         val itemNameColumnWidth = itemRows.maxOfOrNull { (_, name) -> LegacyTextRenderer.width(name) } ?: 0
-        add(ProfitLine("§e§l${target.displayName} Profit", height = OverlayTextStyle.TITLE_HEIGHT))
+        add(ProfitLine(OverlayTextStyle.title("${target.displayName} Profit"), height = OverlayTextStyle.TITLE_HEIGHT))
         if (displayedItems.isEmpty()) {
             add(ProfitLine("§7No tracked drops yet."))
         } else {
             itemRows.forEach { (item, name) ->
-                val count = "§7x${item.amount.addSeparators()}"
+                val count = itemQuantity(item)
+                val countWidth = LegacyTextRenderer.width("§7x§a§l${item.amount.addSeparators()}")
                 val value = item.value?.let { "§6${it.coinFormat()}" } ?: "§8Unknown"
                 val quantityLeft = config.details.quantityPosition == ProfitTrackerQuantityPosition.LEFT
                 add(
@@ -505,9 +511,10 @@ private class ProfitTrackerRenderable(
                         leftColumnWidth = if (quantityLeft) LegacyTextRenderer.width(name) else itemNameColumnWidth,
                         right = value,
                         icon = item.stack.takeIf { renderItemIcons },
-                        height = ITEM_ROW_HEIGHT,
-                        textYOffset = 2,
+                        height = OverlayItemRowStyle.HEIGHT,
+                        textYOffset = OverlayItemRowStyle.TEXT_Y_OFFSET,
                         leading = count.takeIf { quantityLeft },
+                        reservedColumnWidth = countWidth,
                         control = ProfitTrackerControl.ManageItem(item.itemId, item.stack, item.name)
                             .takeIf { inventoryOpen },
                     ),
@@ -563,6 +570,13 @@ private class ProfitTrackerRenderable(
         }
     }
 
+    private fun itemQuantity(item: ProfitDisplayItem): String {
+        val highlighted = config.details.highlightChanges &&
+            ProfitTracker.itemQuantityHighlights.isHighlighted(target.storageKey to item.itemId)
+        val style = if (highlighted) "§a§l" else ""
+        return "§7x$style${item.amount.addSeparators()}"
+    }
+
     private fun controlTooltip(action: ProfitTrackerControl): List<String> = when (action) {
         ProfitTrackerControl.Period -> OverlayControlTooltips.cycle(
             "Display Mode",
@@ -595,13 +609,15 @@ private data class ProfitLine(
     val centered: Boolean = false,
     val leading: String? = null,
     val middle: String? = null,
+    val reservedColumnWidth: Int? = null,
     val leftColumnWidth: Int = LegacyTextRenderer.width(left),
 ) {
-    val leadingWidth: Int = leading?.let(LegacyTextRenderer::width) ?: 0
-    val contentOffset: Int = leadingWidth + if (leading == null) 0 else ITEM_COLUMN_GAP
-    val width: Int = contentOffset + (if (icon == null) 0 else ITEM_TEXT_OFFSET) + leftColumnWidth +
-        (middle?.let { LegacyTextRenderer.width(it) + ITEM_COLUMN_GAP } ?: 0) +
-        (right?.let { LegacyTextRenderer.width(it) + COLUMN_GAP } ?: 0)
+    val leadingWidth: Int = leading?.let { reservedColumnWidth ?: LegacyTextRenderer.width(it) } ?: 0
+    private val middleWidth: Int = middle?.let { reservedColumnWidth ?: LegacyTextRenderer.width(it) } ?: 0
+    val contentOffset: Int = leadingWidth + if (leading == null) 0 else OverlayItemRowStyle.QUANTITY_COLUMN_GAP
+    val width: Int = contentOffset + (if (icon == null) 0 else OverlayItemRowStyle.ICON_TEXT_OFFSET) +
+        leftColumnWidth + (middle?.let { middleWidth + OverlayItemRowStyle.QUANTITY_COLUMN_GAP } ?: 0) +
+        (right?.let { LegacyTextRenderer.width(it) + OverlayItemRowStyle.VALUE_COLUMN_GAP } ?: 0)
 
     fun primaryControlWidth(totalWidth: Int, padding: Int): Int = when {
         control is ProfitTrackerControl.ManageItem -> totalWidth - padding * 2
@@ -611,14 +627,11 @@ private data class ProfitLine(
 }
 
 internal fun formatProfitUptime(activeMillis: Long): String {
-    val totalSeconds = (activeMillis.coerceAtLeast(0L) / MILLIS_PER_SECOND_LONG)
-    val hours = totalSeconds / SECONDS_PER_HOUR
-    val minutes = totalSeconds % SECONDS_PER_HOUR / SECONDS_PER_MINUTE
-    val seconds = totalSeconds % SECONDS_PER_MINUTE
+    val duration = DurationParts.fromMilliseconds(activeMillis)
     return buildList {
-        if (hours > 0L) add("${hours}h")
-        if (minutes > 0L || hours > 0L) add("${minutes}m")
-        add("${seconds}s")
+        if (duration.totalHours > 0L) add("${duration.totalHours}h")
+        if (duration.minutes > 0L || duration.totalHours > 0L) add("${duration.minutes}m")
+        add("${duration.seconds}s")
     }.joinToString(" ")
 }
 
@@ -666,16 +679,8 @@ private fun profitColor(value: Double): String = if (value >= 0.0) "§a" else "�
 
 private const val COIN_CURRENCY = "Coins"
 private const val MILLIS_PER_HOUR = 3_600_000.0
-private const val MILLIS_PER_SECOND_LONG = 1_000L
-private const val SECONDS_PER_MINUTE = 60L
-private const val SECONDS_PER_HOUR = 3_600L
 private const val MAXIMUM_ITEMS = 15
 private const val MAXIMUM_ITEM_NAME_LENGTH = 20
 private const val MINIMUM_WIDTH = 145
-private const val ITEM_ROW_HEIGHT = 13
-private const val ICON_SCALE = 0.75
-private const val ITEM_TEXT_OFFSET = 14
-private const val COLUMN_GAP = 8
-private const val ITEM_COLUMN_GAP = 4
 private const val SIDE_PANEL_ESTIMATED_WIDTH = 310
 private const val TEXT_COLOR = 0xFFFFFFFF.toInt()

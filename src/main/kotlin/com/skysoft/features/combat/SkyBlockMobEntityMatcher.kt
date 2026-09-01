@@ -1,5 +1,7 @@
 package com.skysoft.features.combat
 
+import com.skysoft.data.ClientEntitySnapshot
+import com.skysoft.data.skyblock.withoutSkyBlockMobModifierPrefix
 import com.skysoft.utils.EntityUtilities.cleanName
 import com.skysoft.utils.WorldVec
 import com.skysoft.utils.toWorldVec
@@ -15,38 +17,35 @@ internal data class SkyBlockMobSignal(
     val location: WorldVec,
     val entity: LivingEntity?,
     val nameplate: ArmorStand?,
+    val trackedMob: SkyBlockMob,
+)
+
+internal data class DetectedSkyBlockMob(
+    val name: String,
+    val location: WorldVec,
+    val entity: LivingEntity,
+    val nameplate: ArmorStand?,
     val health: SkyBlockMobHealth?,
 )
 
 internal object SkyBlockMobEntityMatcher {
-    fun visibleSignals(
-        labels: Collection<String>,
-        entities: List<Entity> = allEntities(),
-    ): List<SkyBlockMobSignal> {
+    fun visibleSignals(labels: Collection<String>): List<SkyBlockMobSignal> {
         val preparedLabels = prepareMobLabels(labels)
         if (preparedLabels.isEmpty()) return emptyList()
-        val nameplateSignals = entities.filterIsInstance<ArmorStand>()
-            .mapNotNull { armorStand -> armorStand.signal(entities, preparedLabels) }
-        val nameplateEntityIds = nameplateSignals.mapNotNullTo(mutableSetOf()) { it.entity?.id }
-        val physicalSignals = entities.filterIsInstance<LivingEntity>()
-            .filter { entity -> entity.id !in nameplateEntityIds }
-            .mapNotNull { entity -> entity.physicalSignal(preparedLabels) }
-        return nameplateSignals + physicalSignals
+        return SkyBlockMobTracker.visibleMobs().mapNotNull { mob -> mob.signal(preparedLabels) }
     }
 
     fun hasVisibleNameplateFor(
         entity: LivingEntity,
         labels: Collection<String>,
-        entities: Iterable<Entity> = Minecraft.getInstance().level?.entitiesForRendering() ?: emptyList(),
+        entities: Iterable<Entity> = ClientEntitySnapshot.entities(),
     ): Boolean {
         val preparedLabels = prepareMobLabels(labels)
         if (preparedLabels.isEmpty()) return false
         for (candidate in entities) {
             val nameplate = candidate as? ArmorStand ?: continue
-            if (
-                canPairWithNameplate(entity, nameplate) &&
-                nameplate.signal(entities, preparedLabels)?.entity?.id == entity.id
-            ) {
+            val detected = nameplate.detectedMob(entities) ?: continue
+            if (detected.entity.uuid == entity.uuid && matchingPreparedMobLabel(detected.name, preparedLabels) != null) {
                 return true
             }
         }
@@ -56,35 +55,51 @@ internal object SkyBlockMobEntityMatcher {
     fun canPairWithNameplate(entity: LivingEntity, nameplate: ArmorStand): Boolean =
         entity.isTightPair(nameplate)
 
-    fun allEntities(): List<Entity> =
-        Minecraft.getInstance().level?.entitiesForRendering()?.toList().orEmpty()
+    fun allEntities(): List<Entity> = ClientEntitySnapshot.entities()
 
     fun physicalEntityFor(
         nameplate: ArmorStand,
-        entities: Iterable<Entity> = Minecraft.getInstance().level?.entitiesForRendering() ?: emptyList(),
+        entities: Iterable<Entity> = ClientEntitySnapshot.entities(),
         isCandidate: (LivingEntity) -> Boolean = { true },
     ): LivingEntity? = nameplate.linkedPhysicalEntity(entities, isCandidate)
 
-    private fun ArmorStand.signal(entities: Iterable<Entity>, labels: List<String>): SkyBlockMobSignal? {
+    internal fun detectedMobs(entities: List<Entity>): List<DetectedSkyBlockMob> {
+        val nameplateMobs = entities.filterIsInstance<ArmorStand>()
+            .mapNotNull { nameplate -> nameplate.detectedMob(entities) }
+            .groupBy { mob -> mob.entity.uuid }
+            .values
+            .map { candidates ->
+                candidates.minWith(
+                    compareBy<DetectedSkyBlockMob> { mob -> if (mob.nameplate?.id == mob.entity.id + 1) 0 else 1 }
+                        .thenBy { mob -> mob.nameplate?.let(mob.entity::distanceToSqr) ?: Double.MAX_VALUE },
+                )
+            }
+        val pairedEntityUuids = nameplateMobs.mapTo(mutableSetOf()) { mob -> mob.entity.uuid }
+        val standaloneMobs = entities.filterIsInstance<LivingEntity>()
+            .filter { entity -> entity.uuid !in pairedEntityUuids }
+            .mapNotNull { entity -> entity.detectedStandaloneMob() }
+        return nameplateMobs + standaloneMobs
+    }
+
+    private fun ArmorStand.detectedMob(entities: Iterable<Entity>): DetectedSkyBlockMob? {
         if (!hasCustomName()) return null
-        val name = cleanName()
-        val label = matchingPreparedMobLabel(name, labels) ?: return null
-        val linkedEntity = physicalEntityFor(this, entities)
-        if (linkedEntity?.isDeadOrDying == true) return null
-        return SkyBlockMobSignal(
-            label = label,
-            location = linkedEntity?.position()?.toWorldVec() ?: position().toWorldVec(),
+        val text = cleanName()
+        val health = SkyBlockMobTextParser.parseHealth(text) ?: return null
+        val name = SkyBlockMobTextParser.parseName(text) ?: return null
+        val linkedEntity = physicalEntityFor(this, entities) ?: return null
+        return DetectedSkyBlockMob(
+            name = name,
+            location = linkedEntity.position().toWorldVec(),
             entity = linkedEntity,
             nameplate = this,
-            health = SkyBlockMobTextParser.parseHealth(name),
+            health = health,
         )
     }
 
-    private fun LivingEntity.physicalSignal(labels: List<String>): SkyBlockMobSignal? {
+    private fun LivingEntity.detectedStandaloneMob(): DetectedSkyBlockMob? {
         if (!isStandaloneSignalEntity() || !hasCustomName()) return null
-        val label = matchingPreparedMobLabel(cleanName(), labels) ?: return null
-        return SkyBlockMobSignal(
-            label = label,
+        return DetectedSkyBlockMob(
+            name = cleanName(),
             location = position().toWorldVec(),
             entity = this,
             nameplate = null,
@@ -92,23 +107,19 @@ internal object SkyBlockMobEntityMatcher {
         )
     }
 
+    private fun SkyBlockMob.signal(labels: List<String>): SkyBlockMobSignal? {
+        val label = matchingPreparedMobLabel(name, labels) ?: return null
+        return SkyBlockMobSignal(label, location, entity, nameplate, this)
+    }
+
     private fun ArmorStand.linkedPhysicalEntity(
         entities: Iterable<Entity>,
         isCandidate: (LivingEntity) -> Boolean,
     ): LivingEntity? {
-        var closest: LivingEntity? = null
-        var closestDistance = Double.MAX_VALUE
-        for (candidate in entities) {
-            val entity = candidate as? LivingEntity ?: continue
-            if (!entity.isPossibleSkyBlockMob() || !isCandidate(entity) || !entity.isTightPair(this)) continue
-            if (entity.id == id - 1) return entity
-            val distance = entity.distanceToSqr(this)
-            if (distance < closestDistance) {
-                closest = entity
-                closestDistance = distance
-            }
-        }
-        return closest
+        val candidates = entities
+            .filterIsInstance<LivingEntity>()
+            .filter { entity -> entity.isPossibleSkyBlockMob() && isCandidate(entity) && entity.isTightPair(this) }
+        return candidates.firstOrNull { entity -> entity.id == id - 1 } ?: candidates.singleOrNull()
     }
 
     private fun LivingEntity.isTightPair(nameplate: ArmorStand): Boolean {
@@ -135,7 +146,8 @@ internal fun LivingEntity.isPossibleSkyBlockMob(): Boolean {
 
 private fun matchingPreparedMobLabel(name: String, labels: List<String>): String? {
     if (labels.none { label -> name.contains(label, ignoreCase = true) }) return null
-    val normalizedName = normalizeMobName(SkyBlockMobTextParser.parseName(name) ?: name).withoutMobPrefix()
+    val normalizedName = normalizeMobName(SkyBlockMobTextParser.parseName(name) ?: name)
+        .withoutSkyBlockMobModifierPrefix(ignoreCase = true)
     return labels.firstOrNull { label -> normalizedName.equals(label, ignoreCase = true) }
 }
 
@@ -147,11 +159,5 @@ private fun prepareMobLabels(labels: Collection<String>): List<String> = labels.
 
 private fun normalizeMobName(name: String): String = name.replace(TIER_SUFFIX, "").trim()
 
-private fun String.withoutMobPrefix(): String {
-    val prefix = MOB_PREFIXES.firstOrNull { prefix -> startsWith("$prefix ", ignoreCase = true) } ?: return this
-    return substring(prefix.length + 1)
-}
-
 private val TIER_SUFFIX = Regex("""\s+[IVX]+$""")
-private val MOB_PREFIXES = setOf("Empyrean", "Exalted", "Runic", "Venerable", "Stalwart", "Blessed")
 private const val REAL_PLAYER_UUID_VERSION = 4

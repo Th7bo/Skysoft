@@ -5,6 +5,7 @@
   "client": [
     "HeartLayoutMixin",
     "AnimatedDyeArmorInventoryMixin",
+    "ArmorStandRendererMixin",
     "AbstractContainerMenuMixin",
     "AbstractSignEditScreenMixin",
     "AbstractContainerScreenMixin",
@@ -75,13 +76,15 @@
     "SelectedItemNameMixin",
     "ScoreboardHudAccessor",
     "ScoreboardHudMixin",
+    "ScoreboardPacketMixin",
     "ScreenshotCaptureMixin",
     "ServerPackDataAccessor",
     "ServerPackManagerMixin",
     "ServerPackReloadCallbacksMixin",
     "ServerInfoPacketMixin",
     "SoundPacketMixin",
-    "StatusEffectHudMixin"
+    "StatusEffectHudMixin",
+    "TabListPacketMixin"
   ],
   "injectors": {
     "defaultRequire": 1

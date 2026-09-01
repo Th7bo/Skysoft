@@ -1,6 +1,8 @@
 package com.skysoft
 
 import com.skysoft.config.discovery.NewSettingsDiscovery
+import com.skysoft.data.ClientEntitySnapshot
+import com.skysoft.data.MinecraftProfileLookup
 import com.skysoft.data.ProfileStorageApi
 import com.skysoft.data.hypixel.HypixelLocationState
 import com.skysoft.data.hypixel.HypixelPartyApi
@@ -9,6 +11,7 @@ import com.skysoft.data.hypixel.SkyBlockProfileApi
 import com.skysoft.data.hypixel.TabListApi
 import com.skysoft.data.skyblock.AttributeShardCatalog
 import com.skysoft.data.skyblock.MayorPerkApi
+import com.skysoft.data.skyblock.SafariZoneState
 import com.skysoft.data.skyblock.SkyBlockAreaState
 import com.skysoft.data.skyblock.SkyBlockCurrencyChanges
 import com.skysoft.data.skyblock.SkyBlockDataRepository
@@ -17,12 +20,14 @@ import com.skysoft.data.skyblock.SkyBlockEventScheduleApi
 import com.skysoft.data.skyblock.SkyBlockEventState
 import com.skysoft.data.skyblock.SkyBlockInventoryChanges
 import com.skysoft.data.skyblock.SkyBlockItemChanges
+import com.skysoft.data.skyblock.SkillExpGainApi
 import com.skysoft.data.skyblock.SkyBlockOpenInventoryApi
 import com.skysoft.data.skyblock.SkyBlockSackChanges
 import com.skysoft.data.skyblock.SkyBlockSackContents
 import com.skysoft.data.skyblock.SkyBlockSackTransfers
 import com.skysoft.data.skyblock.SlayerQuestState
 import com.skysoft.data.skyblock.price.SkyBlockPriceData
+import com.skysoft.data.skyblock.pets.PetRepository
 import com.skysoft.events.entity.EntityLifecycleEvents
 import com.skysoft.features.bazaar.BazaarTracker
 import com.skysoft.features.chat.ChatHistoryPersistence
@@ -32,6 +37,7 @@ import com.skysoft.features.chat.PlayerBadges
 import com.skysoft.features.combat.BetterShurikens
 import com.skysoft.features.combat.CocoonTracker
 import com.skysoft.features.combat.HealingPoolLine
+import com.skysoft.features.combat.SkyBlockMobTracker
 import com.skysoft.features.event.diana.DianaBurrowHelper
 import com.skysoft.features.event.diana.DianaBurrowInteractions
 import com.skysoft.features.event.diana.DianaBurrowStorage
@@ -99,15 +105,15 @@ import com.skysoft.features.pets.ActivePetEntityTracker
 import com.skysoft.features.pets.ActivePetOverlay
 import com.skysoft.features.pets.ActivePetTracker
 import com.skysoft.features.pets.PetAnimationLearner
-import com.skysoft.features.pets.PetRepository
 import com.skysoft.features.pets.PetStorageService
 import com.skysoft.features.pets.PetXpEstimator
-import com.skysoft.features.pets.SkillExpGainApi
 import com.skysoft.features.pets.VisiblePetPosition
 import com.skysoft.features.profit.ProfitTracker
 import com.skysoft.features.ravengard.RavengardItemComparisonTooltip
 import com.skysoft.features.ravengard.RavengardLootBagCheckmarks
 import com.skysoft.features.ravengard.RavengardWeaponDpsTooltip
+import com.skysoft.features.safari.CapsuleHelper
+import com.skysoft.features.safari.HighlightCritters
 import com.skysoft.features.safari.HoneybugHelper
 import com.skysoft.features.screenshot.ScreenshotCapturePreview
 import com.skysoft.features.screenshot.ScreenshotManager
@@ -120,6 +126,7 @@ import com.skysoft.features.spotify.SpotifyAuthentication
 import com.skysoft.features.spotify.SpotifyDisplay
 import com.skysoft.gui.DeferredScreenRequests
 import com.skysoft.gui.GuiOverlayRegistry
+import com.skysoft.utils.SidebarScoreboardState
 import com.skysoft.utils.SkysoftErrorBoundary
 import com.skysoft.utils.chat.SkysoftPartyShare
 import com.skysoft.utils.render.EntityHighlightRenderer
@@ -137,13 +144,17 @@ internal object SkysoftFeatureRegistrations {
     }
 
     private fun registerDataAndInfrastructure() {
+        register("Client Entity Snapshot", ClientEntitySnapshot::register)
+        register("Minecraft Profile Lookup", MinecraftProfileLookup::register)
         register("Hypixel Location State", HypixelLocationState::register)
         register("Hypixel Party API", HypixelPartyApi::register)
         register("Party Sharing", SkysoftPartyShare::register)
         register("Tab List API", TabListApi::register)
         register("Cookie Buff API", SkyBlockCookieBuffApi::register)
         register("SkyBlock Profile API", SkyBlockProfileApi::register)
+        register("Sidebar Scoreboard State", SidebarScoreboardState::register)
         registerSkyBlockTrackingApis()
+        register("SkyBlock Mob Tracker", SkyBlockMobTracker::register)
         register("Entity Lifecycle Events", EntityLifecycleEvents::register)
         register("Profile Storage", ProfileStorageApi::register)
         register("SkyBlock Sack Contents", SkyBlockSackContents::register)
@@ -167,6 +178,7 @@ internal object SkysoftFeatureRegistrations {
 
     private fun registerSkyBlockTrackingApis() {
         register("SkyBlock Area State", SkyBlockAreaState::register)
+        register("Safari Zone State", SafariZoneState::register)
         register("SkyBlock Inventory Changes", SkyBlockInventoryChanges::register)
         register("SkyBlock Dropped Items", SkyBlockDroppedItems::register)
         register("SkyBlock Sack Transfers", SkyBlockSackTransfers::register)
@@ -265,6 +277,8 @@ internal object SkysoftFeatureRegistrations {
         register("Queen Ant Warning", QueenAntWarning::register)
         register("Throwing Axe Helper", ThrowingAxeHelper::register)
         register("Hide Axe Particles", ThrowingAxeParticleHider::register)
+        register("Capsule Helper", CapsuleHelper::register)
+        register("Highlight Critters", HighlightCritters::register)
         register("Honeybug Helper", HoneybugHelper::register)
         register("Rare Loot Features", RareLootChatFeatures::register)
         register("Keep Terrain Loaded", KeepTerrainLoaded::register)

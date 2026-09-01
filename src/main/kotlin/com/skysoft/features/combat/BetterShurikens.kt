@@ -1,10 +1,11 @@
 package com.skysoft.features.combat
 
 import com.skysoft.config.SkysoftConfigGui
+import com.skysoft.data.ClientEntitySnapshot
 import com.skysoft.data.hypixel.HypixelLocationState
 import com.skysoft.data.skyblock.SkyBlockItemId.skyBlockId
+import com.skysoft.data.skyblock.pets.PetRepository
 import com.skysoft.events.entity.EntityLifecycleEvents
-import com.skysoft.features.pets.PetRepository
 import com.skysoft.utils.render.SkysoftRenderContext
 import com.skysoft.utils.render.WorldRenderDispatcher
 import com.skysoft.utils.SkysoftClientEvents
@@ -70,7 +71,7 @@ object BetterShurikens {
         clientTick++
 
         updateHeldShuriken(player)
-        val entities = level.entitiesForRendering().toList()
+        val entities = ClientEntitySnapshot.entities()
         if (detectionTicksRemaining > 0) {
             discoverShurikens(entities, player)
             detectionTicksRemaining--
@@ -82,7 +83,6 @@ object BetterShurikens {
         updateTaggedMobs(level, entities)
         BetterShurikenReminderMarkers.update(
             clientTick,
-            entities,
             SkysoftConfigGui.config().combat.betterShurikens.settings.reminderMobs.get().flatMap { it.matchLabels },
         )
         recentItemDisplays.entries.removeIf { (uuid, display) ->
@@ -194,10 +194,9 @@ object BetterShurikens {
         taggedMobs.remove(entity.uuid)
         BetterShurikenReminderMarkers.remove(entity.uuid)
         val tracked = trackedShurikens.remove(entity.uuid) ?: return
-        val candidates = activeLevel?.entitiesForRendering()
-            ?.filterIsInstance<LivingEntity>()
-            ?.filter { candidate -> candidate.isShurikenTarget }
-            .orEmpty()
+        val candidates = ClientEntitySnapshot.entities()
+            .filterIsInstance<LivingEntity>()
+            .filter { candidate -> candidate.isShurikenTarget }
         tracked.updateVelocity()
         resolveAndTag(tracked, entity.position(), candidates)
     }

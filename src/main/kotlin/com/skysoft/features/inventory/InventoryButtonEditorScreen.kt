@@ -7,6 +7,7 @@ import com.skysoft.config.NO_INVENTORY_BUTTON_GROUP
 import com.skysoft.config.SkysoftConfigGui
 import com.skysoft.features.inventory.InventoryButtonManager.BUTTON_SIZE
 import com.skysoft.features.inventory.InventoryButtonManager.IconCandidate
+import com.skysoft.gui.SkysoftEditorScreen
 import com.skysoft.gui.hudEditorNudge
 import com.skysoft.gui.scale.InventoryScaledScreen
 import com.skysoft.gui.scale.shouldUseConfiguredInventoryScale
@@ -42,8 +43,8 @@ object InventoryButtonEditorScreen {
         MinecraftClient.setScreen(EditorScreen(MinecraftClient.screen()))
     }
 
-    class EditorScreen(private val parent: Screen?) :
-        Screen(Component.literal("Skysoft Inventory Buttons")),
+    class EditorScreen(parent: Screen?) :
+        SkysoftEditorScreen(Component.literal("Skysoft Inventory Buttons"), parent),
         InventoryScaledScreen,
         TooltipScrollExcludedScreen {
         override fun inventoryScaleLimit(): Int = 2
@@ -272,10 +273,9 @@ object InventoryButtonEditorScreen {
             return super.charTyped(event)
         }
 
-        override fun onClose() {
+        protected override fun beforeEditorClose() {
             actionsMenu.saveActivePreset()
             SkysoftConfigGui.config().saveNow()
-            MinecraftClient.setScreen(parent)
         }
 
         override fun isPauseScreen(): Boolean = false

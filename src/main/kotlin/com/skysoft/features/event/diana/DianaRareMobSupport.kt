@@ -24,8 +24,8 @@ internal object DianaRareMobRuntime {
     fun localPlayerName(): String? =
         minecraftOrNull()?.player?.gameProfile?.name
 
-    fun shareKey(sender: String, share: DianaRareMobShare): String =
-        "${sender.lowercase()}:${share.mob.name}:${share.location.blockKey()}"
+    fun shareKey(serverName: String, sender: String, share: DianaRareMobShare): String =
+        "$serverName:${sender.lowercase()}:${share.mob.name}:${share.location.blockKey()}"
 
     fun senderFor(message: ChatMessage, share: DianaRareMobShare): ChatMessageSender? =
         senderFor(message, share.marker)
@@ -80,7 +80,7 @@ internal object DianaRareMobLootshare {
                 lastAttack = target.lastLocalAttack,
                 processedSplashIds = target.processedDamageSplashIds,
                 attributionLocations = target.damageAttributionLocations(),
-                targetEntityIds = target.targetEntityIds(),
+                targetEntityUuids = target.targetEntityUuids(),
                 lastHealthChangeAtMillis = target.lastHealthChangeAtMillis,
             )
         } ?: return true
@@ -104,7 +104,9 @@ internal object DianaRareMobGlow {
             val color = target.glowColor(localPlayerName, lootshareEnabled, lootshareColors)
             if (target.glowColor == color) return@forEach
             target.glowColor = color
-            EntityHighlightRenderer.setEntityColor(entity, color) { target in targets && entity.isAlive }
+            EntityHighlightRenderer.setEntityColor(entity, color, source = this) {
+                target in targets && entity.isAlive
+            }
         }
     }
 

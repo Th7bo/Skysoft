@@ -15,7 +15,6 @@ import com.skysoft.gui.GuiOverlayContextType
 import com.skysoft.gui.GuiOverlayLayer
 import com.skysoft.gui.GuiOverlayRegistry
 import com.skysoft.gui.HudEditorElement
-import com.skysoft.gui.HudEditorRegistry
 import com.skysoft.gui.OverlayControlArea
 import com.skysoft.gui.OverlayControlCycle
 import com.skysoft.gui.OverlayControlMouse
@@ -26,21 +25,21 @@ import com.skysoft.utils.MinecraftClient
 import com.skysoft.utils.NumberUtilities.addSeparators
 import com.skysoft.utils.NumberUtilities.coinFormat
 import com.skysoft.utils.SkysoftClientEvents
-import com.skysoft.utils.SkysoftErrorBoundary
 import com.skysoft.utils.SoundUtilities
 import com.skysoft.utils.TextUtilities.cleanSkyBlockText
 import com.skysoft.utils.TextUtilities.truncateLegacyText
+import com.skysoft.utils.gui.OverlayItemRowStyle
 import com.skysoft.utils.gui.OverlayPanelStyle
+import com.skysoft.utils.gui.OverlayTextStyle
 import com.skysoft.utils.gui.Rect
 import com.skysoft.utils.input.InputHandlingResult
+import com.skysoft.utils.input.InputUtilities
 import com.skysoft.utils.render.LegacyTextRenderer
 import com.skysoft.utils.renderables.GuiRenderable
 import com.skysoft.utils.renderables.primitives.ItemIconRenderable
 import com.skysoft.utils.renderables.renderAt
 import kotlin.math.floor
 import kotlin.math.roundToInt
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
-import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
@@ -60,14 +59,14 @@ private var isDisplayHovered = false
 
 private fun registerSackDisplay() {
     SkyBlockDataRepository.Demand.register("Sack Display") { config.enabled }
-    SkyBlockOpenInventoryApi.onUpdate(
+    SkyBlockOpenInventoryApi.onChange(
         "Sack Display inventory",
         isActive = { config.enabled && HypixelLocationState.inSkyBlock },
         listener = ::updateOpenSack,
     )
     SkysoftClientEvents.onDisconnect("Sack Display reset", ::clearSackDisplay)
     registerSackDisplayInput()
-    GuiOverlayRegistry.register(
+    GuiOverlayRegistry.registerHud(
         GuiOverlay(
             id = "sack_display",
             layer = GuiOverlayLayer.BELOW_SCREEN,
@@ -75,47 +74,42 @@ private fun registerSackDisplay() {
             screenForegroundContexts = GuiOverlayContextType.INVENTORIES,
             render = { context, _ -> renderSackDisplay(context) },
         ),
-    )
-    HudEditorRegistry.register(object : HudEditorElement {
-        override val id: String = "sack_display"
-        override val label: String = "Sack Display"
-        override val position get() = config.position
-        override val hasEditorBackground: Boolean get() = !config.details.showBackground
+        object : HudEditorElement {
+            override val id: String = "sack_display"
+            override val label: String = "Sack Display"
+            override val position get() = config.position
+            override val hasEditorBackground: Boolean get() = !config.details.showBackground
 
-        override fun width(): Int = editorRenderable()?.width ?: 0
-        override fun height(): Int = editorRenderable()?.height ?: 0
-        override fun isVisible(): Boolean = isSackDisplayVisible()
-        override fun absoluteX(width: Int): Int = position.getAbsX0AllowingOverflow(0)
-        override fun absoluteY(height: Int): Int = position.getAbsY0AllowingOverflow(0)
-        override fun renderEditor(context: GuiGraphicsExtractor) = editorRenderable()?.render(context) ?: Unit
-        override fun applyEditorDrag(deltaX: Int, deltaY: Int): InputHandlingResult {
-            val targetX = position.getAbsX0AllowingOverflow(0) + deltaX
-            val targetY = position.getAbsY0AllowingOverflow(0) + deltaY
-            position.moveToAbsoluteAllowingOverflow(targetX, targetY, 0, 0)
-            return InputHandlingResult.CONSUMED
-        }
-        override fun applyEditorScroll(scrollY: Double): InputHandlingResult {
-            position.scale += if (scrollY > 0.0) HUD_SCALE_STEP else -HUD_SCALE_STEP
-            return InputHandlingResult.CONSUMED
-        }
-        override fun openConfig() = SkysoftConfigGui.open("Sack Display")
-    })
+            override fun width(): Int = editorRenderable()?.width ?: 0
+            override fun height(): Int = editorRenderable()?.height ?: 0
+            override fun isVisible(): Boolean = isSackDisplayVisible()
+            override fun absoluteX(width: Int): Int = position.getAbsX0AllowingOverflow(0)
+            override fun absoluteY(height: Int): Int = position.getAbsY0AllowingOverflow(0)
+            override fun renderEditor(context: GuiGraphicsExtractor) = editorRenderable()?.render(context) ?: Unit
+            override fun applyEditorDrag(deltaX: Int, deltaY: Int): InputHandlingResult {
+                val targetX = position.getAbsX0AllowingOverflow(0) + deltaX
+                val targetY = position.getAbsY0AllowingOverflow(0) + deltaY
+                position.moveToAbsoluteAllowingOverflow(targetX, targetY, 0, 0)
+                return InputHandlingResult.CONSUMED
+            }
+            override fun applyEditorScroll(scrollY: Double): InputHandlingResult {
+                position.scale += if (scrollY > 0.0) HUD_SCALE_STEP else -HUD_SCALE_STEP
+                return InputHandlingResult.CONSUMED
+            }
+            override fun openConfig() = SkysoftConfigGui.open("Sack Display")
+        },
+    )
 }
 
 private fun registerSackDisplayInput() {
-    ScreenEvents.BEFORE_INIT.register { _, screen, _, _ ->
-        if (screen !is AbstractContainerScreen<*>) return@register
-        ScreenMouseEvents.allowMouseClick(screen).register { _, click ->
-            SkysoftErrorBoundary.value("Sack Display mouse click", true) {
-                shouldAllowSackDisplayClick(screen, click)
-            }
-        }
-        ScreenMouseEvents.allowMouseScroll(screen).register { _, mouseX, mouseY, _, verticalAmount ->
-            SkysoftErrorBoundary.value("Sack Display mouse scroll", true) {
-                InventoryOverlayInput.isPointCovered(screen, mouseX, mouseY) ||
-                    !wasSackDisplayScrollHandled(verticalAmount)
-            }
-        }
+    InventoryOverlayInput.registerClickHandler("Sack Display mouse click", isActive = { true }) { screen, click ->
+        if (shouldAllowSackDisplayClick(screen, click)) InputHandlingResult.IGNORED else InputHandlingResult.CONSUMED
+    }
+    InventoryOverlayInput.registerScrollHandler("Sack Display mouse scroll", isActive = { true }) {
+            screen, mouseX, mouseY, verticalAmount ->
+        val allowed = InventoryOverlayInput.isPointCovered(screen, mouseX, mouseY) ||
+            !wasSackDisplayScrollHandled(verticalAmount)
+        if (allowed) InputHandlingResult.IGNORED else InputHandlingResult.CONSUMED
     }
 }
 
@@ -189,9 +183,7 @@ private fun renderSackDisplay(context: GuiGraphicsExtractor) {
     val renderable = buildRenderable(sack)
     val minecraft = Minecraft.getInstance()
     val screen = MinecraftClient.screen(minecraft) as? AbstractContainerScreen<*> ?: return
-    val window = minecraft.window
-    val mouseX = minecraft.mouseHandler.getScaledXPos(window).toInt()
-    val mouseY = minecraft.mouseHandler.getScaledYPos(window).toInt()
+    val (mouseX, mouseY) = InputUtilities.scaledMousePosition(minecraft)
     val (normalMouseX, normalMouseY) = OverlayControlMouse.normalPoint(mouseX, mouseY)
     val (screenMouseX, screenMouseY) = OverlayControlMouse.screenPoint(mouseX, mouseY)
     val interactive = !InventoryOverlayInput.isPointCovered(screen, screenMouseX.toDouble(), screenMouseY.toDouble())
@@ -315,10 +307,11 @@ private class SackDisplayRenderable(
     private val modeLine = "§7Mode: §a§l[${mode.displayName}]"
     private val priceSourceLine = "§7Price Source: §e§l[$priceSource]"
     private val totalText = totalValue?.let { "§6${it.coinFormat()} coins" } ?: "§8Unknown"
-    private val totalWidth = LegacyTextRenderer.width("§7Total") + COLUMN_GAP + LegacyTextRenderer.width(totalText)
+    private val totalWidth = LegacyTextRenderer.width("§7Total") + OverlayItemRowStyle.VALUE_COLUMN_GAP +
+        LegacyTextRenderer.width(totalText)
     private val contentWidth = maxOf(
         MINIMUM_WIDTH,
-        LegacyTextRenderer.width("§e§l$title"),
+        LegacyTextRenderer.width(OverlayTextStyle.title(title)),
         rows.maxOfOrNull(SackDisplayRow::width) ?: LegacyTextRenderer.width(emptyText),
         LegacyTextRenderer.width(indicatorText),
         LegacyTextRenderer.width(modeLine),
@@ -327,10 +320,10 @@ private class SackDisplayRenderable(
     )
 
     override val width: Int = contentWidth + padding * 2
-    override val height: Int = padding * 2 + TITLE_HEIGHT +
-        (if (rows.isEmpty()) TEXT_ROW_HEIGHT else rows.size * ITEM_ROW_HEIGHT) +
-        (if (indicatorText.isEmpty()) 0 else TEXT_ROW_HEIGHT) +
-        (if (mode == SackDisplayMode.TOTAL_VALUE) TEXT_ROW_HEIGHT + CONTROL_ROW_HEIGHT else 0) +
+    override val height: Int = padding * 2 + OverlayTextStyle.TITLE_HEIGHT +
+        (if (rows.isEmpty()) OverlayTextStyle.ROW_HEIGHT else rows.size * OverlayItemRowStyle.HEIGHT) +
+        (if (indicatorText.isEmpty()) 0 else OverlayTextStyle.ROW_HEIGHT) +
+        (if (mode == SackDisplayMode.TOTAL_VALUE) OverlayTextStyle.ROW_HEIGHT + CONTROL_ROW_HEIGHT else 0) +
         CONTROL_ROW_HEIGHT
 
     override fun render(context: GuiGraphicsExtractor) {
@@ -340,28 +333,28 @@ private class SackDisplayRenderable(
     fun renderInteractive(context: GuiGraphicsExtractor, mouseX: Int?, mouseY: Int?): LocalSackControl? {
         if (background) OverlayPanelStyle.draw(context, 0, 0, width, height)
         var y = padding
-        LegacyTextRenderer.draw(context, "§e§l$title", padding, y)
-        y += TITLE_HEIGHT
+        LegacyTextRenderer.draw(context, OverlayTextStyle.title(title), padding, y)
+        y += OverlayTextStyle.TITLE_HEIGHT
         var hoveredItem: LocalSackControl? = null
         if (rows.isEmpty()) {
             LegacyTextRenderer.draw(context, emptyText, padding, y)
-            y += TEXT_ROW_HEIGHT
+            y += OverlayTextStyle.ROW_HEIGHT
         } else {
             rows.forEach { row ->
                 hoveredItem = row.renderInteractive(context, padding, width - padding, y, mouseX, mouseY)
                     ?: hoveredItem
-                y += ITEM_ROW_HEIGHT
+                y += OverlayItemRowStyle.HEIGHT
             }
         }
         if (indicatorText.isNotEmpty()) {
             LegacyTextRenderer.draw(context, indicatorText, (width - LegacyTextRenderer.width(indicatorText)) / 2, y)
-            y += TEXT_ROW_HEIGHT
+            y += OverlayTextStyle.ROW_HEIGHT
         }
         var hoveredPriceSource: LocalSackControl? = null
         if (mode == SackDisplayMode.TOTAL_VALUE) {
             LegacyTextRenderer.draw(context, "§7Total", padding, y)
             LegacyTextRenderer.draw(context, totalText, width - padding - LegacyTextRenderer.width(totalText), y)
-            y += TEXT_ROW_HEIGHT
+            y += OverlayTextStyle.ROW_HEIGHT
             hoveredPriceSource = renderControl(
                 context,
                 y,
@@ -404,9 +397,7 @@ private class SackDisplayRenderable(
     ): LocalSackControl? {
         val bounds = Rect(padding, y, LegacyTextRenderer.width(line), CONTROL_ROW_HEIGHT)
         val hovered = mouseX != null && mouseY != null && bounds.contains(mouseX, mouseY)
-        if (hovered) {
-            context.fill(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height, CONTROL_HOVER_COLOR)
-        }
+        if (hovered) OverlayTextStyle.drawControlHover(context, bounds, 1.0)
         LegacyTextRenderer.draw(context, line, bounds.x, y + CONTROL_TEXT_Y_OFFSET)
         return LocalSackControl(action, bounds, tooltipLines).takeIf { hovered }
     }
@@ -419,8 +410,9 @@ private data class SackDisplayRow(
     val stack: ItemStack?,
     val reserveIcon: Boolean,
 ) {
-    private val contentOffset = if (reserveIcon) ITEM_TEXT_OFFSET else 0
-    val width: Int = contentOffset + LegacyTextRenderer.width(name) + COLUMN_GAP + LegacyTextRenderer.width(value)
+    private val contentOffset = if (reserveIcon) OverlayItemRowStyle.ICON_TEXT_OFFSET else 0
+    val width: Int = contentOffset + LegacyTextRenderer.width(name) + OverlayItemRowStyle.VALUE_COLUMN_GAP +
+        LegacyTextRenderer.width(value)
 
     fun renderInteractive(
         context: GuiGraphicsExtractor,
@@ -430,14 +422,19 @@ private data class SackDisplayRow(
         mouseX: Int?,
         mouseY: Int?,
     ): LocalSackControl? {
-        val bounds = Rect(left, y, right - left, ITEM_ROW_HEIGHT)
+        val bounds = Rect(left, y, right - left, OverlayItemRowStyle.HEIGHT)
         val hovered = mouseX != null && mouseY != null && bounds.contains(mouseX, mouseY)
-        if (hovered) {
-            context.fill(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height, CONTROL_HOVER_COLOR)
+        if (hovered) OverlayTextStyle.drawControlHover(context, bounds, 1.0)
+        if (reserveIcon) {
+            stack?.let { ItemIconRenderable(it, OverlayItemRowStyle.ICON_SCALE).renderAt(context, left, y) }
         }
-        if (reserveIcon) stack?.let { ItemIconRenderable(it, ICON_SCALE).renderAt(context, left, y) }
-        LegacyTextRenderer.draw(context, name, left + contentOffset, y + ITEM_TEXT_Y_OFFSET)
-        LegacyTextRenderer.draw(context, value, right - LegacyTextRenderer.width(value), y + ITEM_TEXT_Y_OFFSET)
+        LegacyTextRenderer.draw(context, name, left + contentOffset, y + OverlayItemRowStyle.TEXT_Y_OFFSET)
+        LegacyTextRenderer.draw(
+            context,
+            value,
+            right - LegacyTextRenderer.width(value),
+            y + OverlayItemRowStyle.TEXT_Y_OFFSET,
+        )
         return LocalSackControl(SackDisplayControl.Item(item), bounds, emptyList()).takeIf { hovered }
     }
 }
@@ -504,14 +501,6 @@ private sealed interface SackDisplayControl {
 private const val MAXIMUM_DISPLAY_ITEMS = 30
 private const val MAXIMUM_ITEM_NAME_LENGTH = 30
 private const val MINIMUM_WIDTH = 190
-private const val TITLE_HEIGHT = 13
-private const val TEXT_ROW_HEIGHT = 11
-private const val ITEM_ROW_HEIGHT = 14
 private const val CONTROL_ROW_HEIGHT = 13
 private const val CONTROL_TEXT_Y_OFFSET = 1
-private const val ITEM_TEXT_Y_OFFSET = 2
-private const val ICON_SCALE = 0.75
-private const val ITEM_TEXT_OFFSET = 14
-private const val COLUMN_GAP = 8
-private const val CONTROL_HOVER_COLOR = 0x20FFFFFF
 private const val HUD_SCALE_STEP = 0.1f
