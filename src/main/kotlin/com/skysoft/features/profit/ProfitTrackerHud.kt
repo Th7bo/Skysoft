@@ -8,6 +8,7 @@ import com.skysoft.config.ProfitTrackerSummaryLine
 import com.skysoft.config.SkysoftConfigGui
 import com.skysoft.data.ProfileStorage
 import com.skysoft.data.hypixel.HypixelLocationState
+import com.skysoft.data.skyblock.ItemListEntryKind
 import com.skysoft.data.skyblock.SkyBlockDataRepository
 import com.skysoft.features.inventory.InventoryOverlayInput
 import com.skysoft.features.slayer.SlayerTimeToKill
@@ -22,6 +23,7 @@ import com.skysoft.gui.OverlayControlArea
 import com.skysoft.gui.OverlayControlMouse
 import com.skysoft.gui.OverlayControlTooltips
 import com.skysoft.utils.gui.OverlayItemRowStyle
+import com.skysoft.utils.gui.OverlayListScroll
 import com.skysoft.utils.gui.OverlayPanelStyle
 import com.skysoft.utils.gui.OverlayTextStyle
 import com.skysoft.utils.gui.Rect
@@ -33,6 +35,7 @@ import com.skysoft.utils.DurationParts
 import com.skysoft.utils.MinecraftClient
 import com.skysoft.utils.NumberUtilities.addSeparators
 import com.skysoft.utils.NumberUtilities.coinFormat
+import com.skysoft.utils.NumberUtilities.roundTo
 import com.skysoft.utils.NumberUtilities.signedCoinFormat
 import com.skysoft.utils.TextUtilities.truncateLegacyText
 import com.skysoft.utils.render.LegacyTextRenderer
@@ -40,7 +43,6 @@ import com.skysoft.utils.renderables.GuiRenderable
 import com.skysoft.utils.renderables.primitives.ItemIconRenderable
 import com.skysoft.utils.renderables.renderAt
 import com.skysoft.utils.renderables.withIsolatedPose
-import kotlin.math.floor
 import kotlin.math.roundToInt
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -156,12 +158,21 @@ private fun renderProfitTracker(context: GuiGraphicsExtractor) {
         context.nextStratum()
         hoveredControl?.area?.let { area ->
             val managedItem = area.action as? ProfitTrackerControl.ManageItem
+            val pestBreakdown = area.action as? ProfitTrackerControl.PestBreakdown
             if (managedItem != null) {
                 SkysoftNativeTooltip.setItemActionForNextFrame(
                     context,
                     managedItem.stack,
                     "Manage",
                     managedItem.formattedName,
+                    screenMouseX,
+                    screenMouseY,
+                )
+            } else if (pestBreakdown != null && pestBreakdown.rows.isNotEmpty()) {
+                SkysoftNativeTooltip.setItemRowsForNextFrame(
+                    context,
+                    "§ePests Vacuumed",
+                    pestBreakdown.rows,
                     screenMouseX,
                     screenMouseY,
                 )
@@ -201,8 +212,8 @@ private fun renderPositioned(
     val scaledHeight = (renderable.height * scale).roundToInt()
     val x = position.getAbsX0AllowingOverflow(scaledWidth)
     val y = position.getAbsY0AllowingOverflow(scaledHeight)
-    val localMouseX = floor((mouseX - x) / scale).toInt()
-    val localMouseY = floor((mouseY - y) / scale).toInt()
+    val localMouseX = OverlayControlMouse.localCoordinate(mouseX, x, scale)
+    val localMouseY = OverlayControlMouse.localCoordinate(mouseY, y, scale)
     val placePanelRight = x + ((renderable.width + SIDE_PANEL_ESTIMATED_WIDTH) * scale).roundToInt() <=
         Minecraft.getInstance().window.guiScaledWidth
     val localControl = context.withIsolatedPose {
@@ -288,13 +299,21 @@ private fun buildProfitRenderable(target: ProfitTrackerTarget, inventoryOpen: Bo
 private fun registerMouseCapture() {
     val isActive = { SkysoftConfigGui.config().profitTrackers.isAnyEnabled() }
     InventoryOverlayInput.registerClickHandler("Profit Tracker mouse click", isActive) { screen, click ->
+        if (InventoryOverlayInput.isPointCovered(screen, click.x(), click.y())) {
+            itemPanel.close()
+            return@registerClickHandler InputHandlingResult.IGNORED
+        }
         val hovered = hoveredControl
+        val action = hovered?.area?.action
         val target = hovered?.target ?: itemPanelTarget
-        if (target != null && hovered?.area?.action.usesItemPanel()) selectItemPanelTarget(target)
-        val allowed = InventoryOverlayInput.isPointCovered(screen, click.x(), click.y()) ||
-            target == null || !target.isVisible() ||
-            !hudControls.wasClickHandled(screen, target, hovered?.area?.action, click.button())
-        if (allowed) InputHandlingResult.IGNORED else InputHandlingResult.CONSUMED
+        val opensPanel = action.usesItemPanel()
+        if (target != null && opensPanel) selectItemPanelTarget(target)
+        val panelHovered = itemPanel.isHovered
+        val handled = target?.takeIf { it.isVisible() }?.let {
+            hudControls.wasClickHandled(screen, it, action, click.button())
+        } == true
+        if (!panelHovered && !opensPanel && (action != null || !handled)) itemPanel.close()
+        if (handled || panelHovered) InputHandlingResult.CONSUMED else InputHandlingResult.IGNORED
     }
     InventoryOverlayInput.registerScrollHandler("Profit Tracker mouse scroll", isActive) {
             screen, mouseX, mouseY, verticalAmount ->
@@ -315,7 +334,7 @@ private fun wasItemScrollHandled(verticalAmount: Double): Boolean {
     if (maximumOffset == 0) return false
     val key = ItemScrollKey(target, period)
     val current = itemScrollOffsets.getOrDefault(key, 0)
-    itemScrollOffsets[key] = profitTrackerScrollOffset(current, verticalAmount, maximumOffset)
+    itemScrollOffsets[key] = OverlayListScroll.nextOffset(current, verticalAmount, maximumOffset)
     return true
 }
 
@@ -378,6 +397,11 @@ private class ProfitTrackerRenderable(
         control = ProfitTrackerControl.CancelReset,
         secondaryControl = ProfitTrackerControl.ConfirmReset,
     )
+    private val pestBreakdownControl = if (inventoryOpen && target.preset == ProfitTrackerPreset.FARMING) {
+        ProfitTrackerControl.PestBreakdown(pestBreakdownRows())
+    } else {
+        null
+    }
     private val lines = buildLines()
 
     override val width: Int = maxOf(
@@ -521,11 +545,8 @@ private class ProfitTrackerRenderable(
                 )
             }
         }
-        if (remainingItems > 0) {
-            add(ProfitLine("§7$remainingItems more...", centered = true))
-        } else if (hiddenItemsAbove > 0) {
-            add(ProfitLine("§7$hiddenItemsAbove above...", centered = true))
-        }
+        val scrollIndicator = OverlayListScroll.indicator(hiddenItemsAbove, remainingItems)
+        if (scrollIndicator.isNotEmpty()) add(ProfitLine(scrollIndicator, centered = true))
         val profitPerHour = profitPerHour(profit, stats.activeMillis)
         summaryLines.forEach { summaryLine ->
             when (summaryLine) {
@@ -544,7 +565,13 @@ private class ProfitTrackerRenderable(
                     add(ProfitLine("§7$label", profitColor(profitPerHour) + profitPerHour.signedCoinFormat()))
                 }
                 ProfitTrackerSummaryLine.ACTIONS -> {
-                    add(ProfitLine("§7${target.actionLabel}", "§e${stats.actions.addSeparators()}"))
+                    add(
+                        ProfitLine(
+                            "§7${target.actionLabel}",
+                            "§e${stats.actions.addSeparators()}",
+                            control = pestBreakdownControl,
+                        ),
+                    )
                 }
                 ProfitTrackerSummaryLine.AVERAGE_KILL_TIME -> add(
                     ProfitLine(
@@ -577,6 +604,27 @@ private class ProfitTrackerRenderable(
         return "§7x$style${item.amount.addSeparators()}"
     }
 
+    private fun pestBreakdownRows(): List<SkysoftNativeTooltip.ItemRow> {
+        if (stats.actions == 0L) return emptyList()
+        val counts = stats.pestKills.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenBy { it.key })
+            .map { it.key to it.value }
+            .toMutableList()
+        val unrecorded = stats.actions - stats.pestKills.values.sum()
+        if (unrecorded > 0L) counts.add("Not recorded" to unrecorded)
+        val pests = SkyBlockDataRepository.entries.asSequence()
+            .filter { it.key.kind == ItemListEntryKind.ENTITY && "Pest" in it.tags }
+            .associateBy { it.displayName }
+        return counts.map { (pest, count) ->
+            val percentage = (count * PERCENT_SCALE / stats.actions).roundTo(1).toString().removeSuffix(".0")
+            SkysoftNativeTooltip.ItemRow(
+                stack = pests[pest]?.let { SkyBlockDataRepository.displayStack(it.key) },
+                label = "§7$pest §e${count.addSeparators()}",
+                value = "§7($percentage%)",
+            )
+        }
+    }
+
     private fun controlTooltip(action: ProfitTrackerControl): List<String> = when (action) {
         ProfitTrackerControl.Period -> OverlayControlTooltips.cycle(
             "Display Mode",
@@ -593,6 +641,7 @@ private class ProfitTrackerRenderable(
         -> listOf("§7Reset ${period.displayName} ${target.displayName} data.")
         ProfitTrackerControl.CancelReset -> emptyList()
         ProfitTrackerControl.More -> listOf("§7Manage tracked items.")
+        is ProfitTrackerControl.PestBreakdown -> listOf("§ePests Vacuumed", "§7No pests vacuumed yet.")
         is ProfitTrackerControl.ManageItem -> emptyList()
         else -> emptyList()
     }
@@ -620,7 +669,8 @@ private data class ProfitLine(
         (right?.let { LegacyTextRenderer.width(it) + OverlayItemRowStyle.VALUE_COLUMN_GAP } ?: 0)
 
     fun primaryControlWidth(totalWidth: Int, padding: Int): Int = when {
-        control is ProfitTrackerControl.ManageItem -> totalWidth - padding * 2
+        control is ProfitTrackerControl.ManageItem || control is ProfitTrackerControl.PestBreakdown ->
+            totalWidth - padding * 2
         secondaryControl == null -> width
         else -> LegacyTextRenderer.width(left)
     }
@@ -679,6 +729,7 @@ private fun profitColor(value: Double): String = if (value >= 0.0) "§a" else "�
 
 private const val COIN_CURRENCY = "Coins"
 private const val MILLIS_PER_HOUR = 3_600_000.0
+private const val PERCENT_SCALE = 100.0
 private const val MAXIMUM_ITEMS = 15
 private const val MAXIMUM_ITEM_NAME_LENGTH = 20
 private const val MINIMUM_WIDTH = 145

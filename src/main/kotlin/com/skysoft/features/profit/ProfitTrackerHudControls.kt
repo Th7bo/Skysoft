@@ -103,6 +103,7 @@ internal class ProfitTrackerHudControls(
             resetTransition.hide()
         }
         ProfitTrackerControl.More -> wasLeftClickHandled(button, itemPanel::toggleOverview)
+        is ProfitTrackerControl.PestBreakdown -> false
         is ProfitTrackerControl.ManageItem -> wasLeftClickHandled(button) { itemPanel.toggleItem(action.itemId) }
         is ProfitTrackerControl.ItemPriceSource -> wasItemPriceSourceCycled(target, action.itemId, button)
         is ProfitTrackerControl.ModifyItem -> wasLeftClickHandled(button) {
@@ -201,9 +202,6 @@ internal class ProfitTrackerHudControls(
         val period: ProfitTrackingPeriod,
     )
 }
-
-internal fun profitTrackerScrollOffset(current: Int, verticalAmount: Double, maximumOffset: Int): Int =
-    (current + if (verticalAmount < 0.0) 1 else -1).coerceIn(0, maximumOffset)
 
 internal fun nextProfitTrackerPriceSource(
     current: ProfitTrackerPriceSource,

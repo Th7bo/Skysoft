@@ -10,6 +10,7 @@ import com.skysoft.data.hypixel.SkyBlockCookieBuffApi
 import com.skysoft.data.hypixel.SkyBlockProfileApi
 import com.skysoft.data.hypixel.TabListApi
 import com.skysoft.data.skyblock.AttributeShardCatalog
+import com.skysoft.data.skyblock.GardenPestState
 import com.skysoft.data.skyblock.MayorPerkApi
 import com.skysoft.data.skyblock.SafariZoneState
 import com.skysoft.data.skyblock.SkyBlockAreaState
@@ -34,6 +35,7 @@ import com.skysoft.features.chat.ChatHistoryPersistence
 import com.skysoft.features.chat.ChatTabs
 import com.skysoft.features.chat.ImageLinkPreview
 import com.skysoft.features.chat.PlayerBadges
+import com.skysoft.features.combat.BestiaryHelper
 import com.skysoft.features.combat.BetterShurikens
 import com.skysoft.features.combat.CocoonTracker
 import com.skysoft.features.combat.HealingPoolLine
@@ -45,7 +47,10 @@ import com.skysoft.features.event.diana.DianaLobbyCompromisedWatcher
 import com.skysoft.features.event.diana.DianaParticleQuality
 import com.skysoft.features.event.diana.DianaRareMobSharing
 import com.skysoft.features.event.diana.MythologicalRitualTracker
+import com.skysoft.features.farming.HighlightPests
 import com.skysoft.features.farming.NoCropRotation
+import com.skysoft.features.farming.PestHelper
+import com.skysoft.features.farming.PestSpawnCooldownWarning
 import com.skysoft.features.fishing.FishingHotspotRadar
 import com.skysoft.features.fishing.FishingHotspotSharing
 import com.skysoft.features.fishing.SeaCreatureCatchMessages
@@ -54,6 +59,7 @@ import com.skysoft.features.foraging.HoneyhiveHelper
 import com.skysoft.features.foraging.QueenAntWarning
 import com.skysoft.features.foraging.ThrowingAxeHelper
 import com.skysoft.features.foraging.ThrowingAxeParticleHider
+import com.skysoft.features.hunting.LassoDisplay
 import com.skysoft.features.hunting.LotumHelper
 import com.skysoft.features.inventory.AnimatedDyeArmorCache
 import com.skysoft.features.inventory.DuplicateEnchantmentTooltipFix
@@ -75,6 +81,7 @@ import com.skysoft.features.inventory.SmoothSwapping
 import com.skysoft.features.inventory.StorageCache
 import com.skysoft.features.inventory.StorageOverlayController
 import com.skysoft.features.inventory.StoragePreviews
+import com.skysoft.features.inventory.crafting.CraftingHelper
 import com.skysoft.features.inventory.itemlist.ItemListController
 import com.skysoft.features.inventory.itemlist.ItemListNpcWaypoint
 import com.skysoft.features.inventory.itemlist.ItemListState
@@ -84,6 +91,7 @@ import com.skysoft.features.mining.MiningAbilityCooldownDisplay
 import com.skysoft.features.misc.DayDisplay
 import com.skysoft.features.misc.ForIntrests
 import com.skysoft.features.misc.KeepTerrainLoaded
+import com.skysoft.features.misc.HideSillyButtons
 import com.skysoft.features.misc.MouseLock
 import com.skysoft.features.misc.PartyDisplay
 import com.skysoft.features.misc.PlayerHeadSkinFix
@@ -174,9 +182,11 @@ internal object SkysoftFeatureRegistrations {
         register("Chat Image Preview", ImageLinkPreview::register)
         register("Screen Alert Renderer", ScreenAlertRenderer::register)
         register("Lotum Helper", LotumHelper::register)
+        register("Lasso Display", LassoDisplay::register)
     }
 
     private fun registerSkyBlockTrackingApis() {
+        register("Garden Pest State", GardenPestState::register)
         register("SkyBlock Area State", SkyBlockAreaState::register)
         register("Safari Zone State", SafariZoneState::register)
         register("SkyBlock Inventory Changes", SkyBlockInventoryChanges::register)
@@ -211,6 +221,7 @@ internal object SkysoftFeatureRegistrations {
         register("Item List State", ItemListState::register)
         register("Item List", ItemListController::register)
         register("Item List Waypoints", ItemListNpcWaypoint::register)
+        register("Crafting Helper", CraftingHelper::register)
         register("Storage Overlay", StorageOverlayController::register)
         register("Smooth Swapping", SmoothSwapping::register)
     }
@@ -258,11 +269,15 @@ internal object SkysoftFeatureRegistrations {
     }
 
     private fun registerGameplayFeatures() {
+        register("Highlight Pests", HighlightPests::register)
+        register("Pest Helper", PestHelper::register)
+        register("Pest Spawn Cooldown Warning", PestSpawnCooldownWarning::register)
         register("No Crop Rotation", NoCropRotation::register)
         register("Bazaar Tracker", BazaarTracker::register)
         register("Cocoon Tracker", CocoonTracker::register)
         register("Healing Pool Line", HealingPoolLine::register)
         register("Better Shurikens", BetterShurikens::register)
+        register("Bestiary Helper", BestiaryHelper::register)
         register("Ravengard Loot Bag Checkmarks", RavengardLootBagCheckmarks::register)
         register("Slayer Boss Alerts", SlayerBossAlerts::register)
         register("Slayer Miniboss Alert", SlayerMinibossAlert::register)
@@ -282,6 +297,7 @@ internal object SkysoftFeatureRegistrations {
         register("Honeybug Helper", HoneybugHelper::register)
         register("Rare Loot Features", RareLootChatFeatures::register)
         register("Keep Terrain Loaded", KeepTerrainLoaded::register)
+        register("Hide Silly Buttons", HideSillyButtons::register)
         register("Diana Burrow Storage", DianaBurrowStorage::register)
         register("Diana Particle Quality", DianaParticleQuality::register)
         register("Diana Burrow Helper", DianaBurrowHelper::register)

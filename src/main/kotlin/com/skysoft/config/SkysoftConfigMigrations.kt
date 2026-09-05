@@ -7,7 +7,7 @@ import com.skysoft.data.ProfileStorage
 import java.util.Locale
 
 internal object SkysoftConfigMigrations {
-    const val CURRENT_CONFIG_MIGRATION_VERSION = 20
+    const val CURRENT_CONFIG_MIGRATION_VERSION = 23
 
     fun apply(json: JsonObject, gson: Gson) {
         val migrationVersion = json.get(CONFIG_MIGRATION_VERSION_FIELD)
@@ -76,6 +76,8 @@ internal object SkysoftConfigMigrations {
         if (migrationVersion < SERVER_INFO_METRIC_COLORS_VERSION) migrateServerInfoMetricColors(json)
         migrateCursorPositionPreservation(json, migrationVersion)
         migrateDianaParticleQualitySetup(json, migrationVersion)
+        if (migrationVersion < MOUSE_LOCK_FARMING_CATEGORY_VERSION) migrateMouseLockIntoFarming(json)
+        migrateHoneyhiveHelper(json, migrationVersion)
         json.addProperty(CONFIG_MIGRATION_VERSION_FIELD, CURRENT_CONFIG_MIGRATION_VERSION)
     }
 
@@ -260,6 +262,20 @@ internal object SkysoftConfigMigrations {
         }
     }
 
+    private fun migrateMouseLockIntoFarming(json: JsonObject) {
+        val miscJson = json.getObjectOrNull("misc") ?: return
+        val mouseLockJson = miscJson.remove("mouseLock")
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?: return
+        val farmingJson = json.getOrCreateObject("farming")
+        mouseLockJson.getObjectOrNull("settings")?.remove("unlockOnPestSpawn")?.let { unlockOnWarp ->
+            val settingsJson = farmingJson.getOrCreateObject("pestHelper").getOrCreateObject("settings")
+            if (!settingsJson.has("unlockOnWarp")) settingsJson.add("unlockOnWarp", unlockOnWarp)
+        }
+        if (!farmingJson.has("mouseLock")) farmingJson.add("mouseLock", mouseLockJson)
+    }
+
     private fun migrateChatLayout(json: JsonObject) {
         val smoothChatJson = json.getObjectOrNull("chat")?.getObjectOrNull("smoothChat") ?: return
         smoothChatJson.moveFieldsInto("settings", SMOOTH_CHAT_SETTINGS_FIELDS)
@@ -412,6 +428,7 @@ internal object SkysoftConfigMigrations {
     private const val SERVER_INFO_METRIC_COLORS_VERSION = 13
     private const val DIANA_FEATURE_ACCORDIONS_VERSION = 15
     private const val DIANA_AND_TERRAIN_SETTINGS_VERSION = 19
+    private const val MOUSE_LOCK_FARMING_CATEGORY_VERSION = 21
     private const val SKYBLOCK_MENU_DROP_FIX_FIELD = "preventSkyBlockMenuOpeningOnInventoryDrop"
 }
 
@@ -624,6 +641,20 @@ private fun JsonObject.moveBooleanToDisplayMode(target: JsonObject, fieldName: S
     }
     remove(fieldName)
 }
+
+private fun migrateHoneyhiveHelper(json: JsonObject, migrationVersion: Int) {
+    if (migrationVersion >= HONEYHIVE_HELPER_CATEGORY_VERSION) return
+    val foraging = json.getObjectOrNull("foraging") ?: return
+    val legacy = foraging.get("honeyhiveHelper") ?: return
+    if (legacy.isJsonPrimitive) {
+        foraging.add("honeyhiveHelper", JsonObject().also { it.add("enabled", legacy.deepCopy()) })
+    }
+    val settings = foraging.getObjectOrNull("honeyhiveHelper")?.getObjectOrNull("settings") ?: return
+    mapOf("showDisplay" to "display", "maxRows" to "maximumLines", "showOutsideIsland" to "showOutsideTorrhus")
+        .forEach { (oldName, newName) -> settings.moveFieldInto(settings, oldName, newName) }
+}
+
+private const val HONEYHIVE_HELPER_CATEGORY_VERSION = 23
 
 private fun migratePriceTooltipCustomization(json: JsonObject) {
     val settingsJson = json.get("inventory")?.takeIf { it.isJsonObject }?.asJsonObject
