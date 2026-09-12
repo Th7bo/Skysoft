@@ -175,16 +175,18 @@ class InventoryButtonConfig(
         icon = icon?.trim()?.takeIf { it.isNotEmpty() }
         requiredKey = requiredKey.takeIf { it in GLFW.GLFW_KEY_SPACE..GLFW.GLFW_KEY_LAST }
             ?: GLFW.GLFW_KEY_UNKNOWN
-        scale = scale
-            .takeIf(Float::isFinite)
-            ?.takeIf { it > 0f }
-            ?.coerceIn(MIN_INVENTORY_BUTTON_SCALE, MAX_INVENTORY_BUTTON_SCALE)
-            ?: DEFAULT_INVENTORY_BUTTON_SCALE
+        scale = normalizedInventoryButtonScale(scale)
         isUserCreated = isUserCreated ?: isLegacyExtraButton
         group = group.coerceIn(NO_INVENTORY_BUTTON_GROUP, INVENTORY_BUTTON_GROUP_COUNT)
         toggleGroup = toggleGroup.coerceIn(NO_INVENTORY_BUTTON_GROUP, INVENTORY_BUTTON_GROUP_COUNT)
     }
 }
+
+internal fun normalizedInventoryButtonScale(scale: Float): Float = scale
+    .takeIf(Float::isFinite)
+    ?.takeIf { it > 0f }
+    ?.coerceIn(MIN_INVENTORY_BUTTON_SCALE, MAX_INVENTORY_BUTTON_SCALE)
+    ?: DEFAULT_INVENTORY_BUTTON_SCALE
 
 const val MIN_INVENTORY_BUTTON_SCALE = 0.5f
 

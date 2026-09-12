@@ -1,5 +1,6 @@
 package com.skysoft.features.inventory
 
+import com.skysoft.config.InventoryButtonClickType
 import com.skysoft.config.InventoryButtonConfig
 import com.skysoft.config.InventoryButtonDefaults
 import com.skysoft.config.SkysoftConfigGui
@@ -12,7 +13,7 @@ internal object InventoryButtonImportService {
         private set
     var pendingPlan: InventoryButtonImportPlan? = null
         private set
-    private var undoSnapshot: InventoryButtonImportSnapshot? = null
+    private var undoSnapshot: ImportSnapshot? = null
 
     fun discover(): List<InventoryButtonImportSource> = recordDiscovery(discoverInventoryButtonImportSources())
 
@@ -41,8 +42,8 @@ internal object InventoryButtonImportService {
         return plan
     }
 
-    fun undoImport(): InventoryButtonImportSnapshot? {
-        val snapshot = undoSnapshot ?: return null
+    fun didUndoImport(): Boolean {
+        val snapshot = undoSnapshot ?: return false
         val config = config()
         config.replaceActiveButtons(snapshot.buttons)
         config.enabled = snapshot.isEnabled
@@ -50,15 +51,15 @@ internal object InventoryButtonImportService {
         config.details.tooltipDelay = snapshot.tooltipDelay
         SkysoftConfigGui.config().saveNow()
         InventoryButtonGroups.collapseAll()
-        InventoryButtonManager.clearIconCache()
+        InventoryButtonIcons.clearIconCache()
         undoSnapshot = null
-        return snapshot
+        return true
     }
 
-    fun cancelPendingImport(): InventoryButtonImportPlan? {
-        val plan = pendingPlan ?: return null
+    fun didCancelPendingImport(): Boolean {
+        if (pendingPlan == null) return false
         pendingPlan = null
-        return plan
+        return true
     }
 
     private fun recordDiscovery(sources: List<InventoryButtonImportSource>): List<InventoryButtonImportSource> {
@@ -67,8 +68,8 @@ internal object InventoryButtonImportService {
         return sources
     }
 
-    private fun snapshot(config: com.skysoft.config.InventoryButtonsConfig) = InventoryButtonImportSnapshot(
-        config.buttons.map(InventoryButtonConfig::copy).toMutableList(),
+    private fun snapshot(config: com.skysoft.config.InventoryButtonsConfig) = ImportSnapshot(
+        config.buttons.map(InventoryButtonConfig::copy),
         config.enabled,
         config.settings.clickType,
         config.details.tooltipDelay,
@@ -83,11 +84,18 @@ internal object InventoryButtonImportService {
         plan.read.settings.tooltipDelay?.let { config.details.tooltipDelay = it }
         SkysoftConfigGui.config().saveNow()
         InventoryButtonGroups.collapseAll()
-        InventoryButtonManager.clearIconCache()
+        InventoryButtonIcons.clearIconCache()
         pendingPlan = null
     }
 
     private fun config() = SkysoftConfigGui.config().inventory.inventoryButtons
+
+    private data class ImportSnapshot(
+        val buttons: List<InventoryButtonConfig>,
+        val isEnabled: Boolean,
+        val clickType: InventoryButtonClickType,
+        val tooltipDelay: Int,
+    )
 }
 
 internal fun planInventoryButtonImport(

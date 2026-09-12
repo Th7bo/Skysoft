@@ -2,11 +2,9 @@ package com.skysoft.features.inventory
 
 import com.skysoft.config.INVENTORY_BUTTON_GROUP_COUNT
 import com.skysoft.config.InventoryButtonConfig
-import com.skysoft.config.InventoryButtonDefaults
 import com.skysoft.config.NO_INVENTORY_BUTTON_GROUP
 import com.skysoft.config.SkysoftConfigGui
 import com.skysoft.features.inventory.InventoryButtonManager.BUTTON_SIZE
-import com.skysoft.features.inventory.InventoryButtonManager.IconCandidate
 import com.skysoft.gui.SkysoftEditorScreen
 import com.skysoft.gui.hudEditorNudge
 import com.skysoft.gui.scale.InventoryScaledScreen
@@ -23,11 +21,7 @@ import com.skysoft.utils.input.InputHandlingResult
 import com.skysoft.utils.input.InputUtilities
 import com.skysoft.utils.render.LegacyTextRenderer
 import java.util.Locale
-import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 import net.minecraft.ChatFormatting
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -50,14 +44,9 @@ object InventoryButtonEditorScreen {
         override fun inventoryScaleLimit(): Int = 2
         internal val config get() = SkysoftConfigGui.config().inventory.inventoryButtons
         internal val commandField = TextFieldState(maxLength = 128)
-        internal val iconField = TextFieldState(maxLength = 64)
+        internal val iconSearch = InventoryButtonIconSearch(IconResults.COLUMNS, IconResults.ROWS)
         internal var selectedIndex: Int? = null
-        internal var resultScrollRow = 0
-        internal var lastIconSearch: String? = null
-        internal var cachedIconCandidates: List<IconCandidate> = emptyList()
-        internal var lastInventoryLeft = 0
-        internal var lastInventoryTop = 0
-        internal var lastPreviewScale = 1f
+        internal var previewGeometry = InventoryButtonEditorGeometry()
         internal var lastPanelBounds: Rect? = null
         internal var lastResultsBounds: Rect? = null
         internal var lastRequiredKeyBounds: Rect? = null
@@ -67,7 +56,7 @@ object InventoryButtonEditorScreen {
         internal var lastDoneBounds: Rect? = null
         internal var hoveredIndex: Int? = null
         internal var waitingForRequiredKey = false
-        private val isTextFieldFocused get() = commandField.focused || iconField.focused
+        private val isTextFieldFocused get() = commandField.focused || iconSearch.field.focused
         private var grabbedIndex: Int? = null
         private var grabbedOffsetX = 0
         private var grabbedOffsetY = 0
@@ -105,13 +94,13 @@ object InventoryButtonEditorScreen {
             if (click.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) return super.mouseClicked(click, doubled)
             grabbedIndex = null
 
-            val previewMouseX = EditorRenderer.previewMouseX(this, mouseX)
-            val previewMouseY = EditorRenderer.previewMouseY(this, mouseY)
+            val previewMouseX = previewGeometry.previewMouseX(mouseX)
+            val previewMouseY = previewGeometry.previewMouseY(mouseY)
             val placement = InventoryButtonManager.placements(
                 left = 0,
                 top = 0,
-                imageWidth = InventoryPreview.WIDTH,
-                imageHeight = InventoryPreview.HEIGHT,
+                imageWidth = InventoryButtonPreviewDimensions.WIDTH,
+                imageHeight = InventoryButtonPreviewDimensions.HEIGHT,
                 playerInventory = true,
                 includeInactive = true,
             ).lastOrNull { it.bounds.contains(previewMouseX, previewMouseY) }
@@ -140,7 +129,7 @@ object InventoryButtonEditorScreen {
                 }
                 else -> {
                     commandField.focused = false
-                    iconField.focused = false
+                    iconSearch.field.focused = false
                     selectedIndex = null
                     true
                 }
@@ -153,12 +142,12 @@ object InventoryButtonEditorScreen {
                 ?: return super.mouseDragged(click, dragX, dragY)
             InventoryButtonLayout.moveButton(
                 InventoryButtonCanvas(
-                    Rect(0, 0, InventoryPreview.WIDTH, InventoryPreview.HEIGHT),
+                    Rect(0, 0, InventoryButtonPreviewDimensions.WIDTH, InventoryButtonPreviewDimensions.HEIGHT),
                     playerInventory = true,
                 ),
                 button,
-                EditorRenderer.previewMouseX(this, click.x().toInt()) - grabbedOffsetX,
-                EditorRenderer.previewMouseY(this, click.y().toInt()) - grabbedOffsetY,
+                previewGeometry.previewMouseX(click.x().toInt()) - grabbedOffsetX,
+                previewGeometry.previewMouseY(click.y().toInt()) - grabbedOffsetY,
             )
             return true
         }
@@ -166,17 +155,16 @@ object InventoryButtonEditorScreen {
         override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
             val results = lastResultsBounds
             if (results != null && results.contains(mouseX.toInt(), mouseY.toInt())) {
-                val maxScroll = maxResultScrollRow()
-                resultScrollRow = (resultScrollRow - scrollY.toInt()).coerceIn(0, maxScroll)
+                iconSearch.scrollBy(scrollY.toInt())
                 return true
             }
-            val previewMouseX = EditorRenderer.previewMouseX(this, mouseX.toInt())
-            val previewMouseY = EditorRenderer.previewMouseY(this, mouseY.toInt())
+            val previewMouseX = previewGeometry.previewMouseX(mouseX.toInt())
+            val previewMouseY = previewGeometry.previewMouseY(mouseY.toInt())
             val placement = InventoryButtonManager.placements(
                 left = 0,
                 top = 0,
-                imageWidth = InventoryPreview.WIDTH,
-                imageHeight = InventoryPreview.HEIGHT,
+                imageWidth = InventoryButtonPreviewDimensions.WIDTH,
+                imageHeight = InventoryButtonPreviewDimensions.HEIGHT,
                 playerInventory = true,
                 includeInactive = true,
             ).lastOrNull { it.bounds.contains(previewMouseX, previewMouseY) }
@@ -194,14 +182,14 @@ object InventoryButtonEditorScreen {
             return when {
                 event.key() == GLFW.GLFW_KEY_ESCAPE && isTextFieldFocused -> {
                     commandField.focused = false
-                    iconField.focused = false
+                    iconSearch.field.focused = false
                     true
                 }
                 commandField.focused && commandField.keyPressed(event) == InputHandlingResult.CONSUMED -> {
                     updateSelectedCommandFromField()
                     true
                 }
-                iconField.focused && handleIconFieldKey(event) == InputHandlingResult.CONSUMED -> true
+                iconSearch.field.focused && handleIconFieldKey(event) == InputHandlingResult.CONSUMED -> true
                 !isTextFieldFocused && nudgeActiveButton(event.key()) == InputHandlingResult.CONSUMED -> true
                 event.key() == GLFW.GLFW_KEY_R && !isTextFieldFocused -> {
                     val index = hoveredIndex ?: selectedIndex
@@ -233,20 +221,20 @@ object InventoryButtonEditorScreen {
 
         private fun handleIconFieldKey(event: KeyEvent): InputHandlingResult {
             if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
-                val typed = iconField.text.trim()
+                val typed = iconSearch.field.text.trim()
                 val selectedIcon = when {
                     typed.startsWith("text:", ignoreCase = true) -> typed
-                    else -> iconCandidates().firstOrNull()?.id
+                    else -> iconSearch.candidates().firstOrNull()?.id
                 }
                 if (!selectedIcon.isNullOrBlank()) {
                     selectedButton()?.icon = selectedIcon
-                    InventoryButtonManager.clearIconCache()
+                    InventoryButtonIcons.clearIconCache()
                 }
-                iconField.focused = false
+                iconSearch.field.focused = false
                 return InputHandlingResult.CONSUMED
             }
-            if (iconField.keyPressed(event) == InputHandlingResult.IGNORED) return InputHandlingResult.IGNORED
-            resultScrollRow = 0
+            if (iconSearch.field.keyPressed(event) == InputHandlingResult.IGNORED) return InputHandlingResult.IGNORED
+            iconSearch.resetScroll()
             return InputHandlingResult.CONSUMED
         }
 
@@ -265,9 +253,9 @@ object InventoryButtonEditorScreen {
                 updateSelectedCommandFromField()
                 return true
             }
-            if (iconField.focused) {
-                iconField.charTyped(event)
-                resultScrollRow = 0
+            if (iconSearch.field.focused) {
+                iconSearch.field.charTyped(event)
+                iconSearch.resetScroll()
                 return true
             }
             return super.charTyped(event)
@@ -298,10 +286,10 @@ object InventoryButtonEditorScreen {
             when {
                 commandBounds.contains(mouseX, mouseY) -> {
                     commandField.focused = true
-                    iconField.focused = false
+                    iconSearch.field.focused = false
                 }
                 iconBounds.contains(mouseX, mouseY) -> {
-                    iconField.focused = true
+                    iconSearch.field.focused = true
                     commandField.focused = false
                 }
                 selectBackgroundIfClicked(button, panel, mouseX, mouseY) == InputHandlingResult.CONSUMED -> Unit
@@ -314,12 +302,12 @@ object InventoryButtonEditorScreen {
                 lastDoneBounds?.contains(mouseX, mouseY) == true -> {
                     SoundUtilities.playClickSound()
                     commandField.focused = false
-                    iconField.focused = false
+                    iconSearch.field.focused = false
                     selectedIndex = null
                 }
                 else -> {
                     commandField.focused = false
-                    iconField.focused = false
+                    iconSearch.field.focused = false
                 }
             }
         }
@@ -351,10 +339,10 @@ object InventoryButtonEditorScreen {
             if (column !in 0 until IconResults.COLUMNS || row !in 0 until IconResults.ROWS) {
                 return InputHandlingResult.CONSUMED
             }
-            val index = (resultScrollRow + row) * IconResults.COLUMNS + column
-            val candidate = iconCandidates().getOrNull(index) ?: return InputHandlingResult.CONSUMED
+            val index = (iconSearch.scrollRow + row) * IconResults.COLUMNS + column
+            val candidate = iconSearch.candidates().getOrNull(index) ?: return InputHandlingResult.CONSUMED
             button.icon = candidate.id
-            InventoryButtonManager.clearIconCache()
+            InventoryButtonIcons.clearIconCache()
             return InputHandlingResult.CONSUMED
         }
 
@@ -363,42 +351,15 @@ object InventoryButtonEditorScreen {
         private fun syncFieldsFromSelection() {
             val button = selectedButton()
             commandField.text = button?.command?.removePrefix("/").orEmpty()
-            iconField.text = ""
             commandField.focused = false
-            iconField.focused = false
+            iconSearch.reset()
             waitingForRequiredKey = false
-            resultScrollRow = 0
-            lastIconSearch = null
-            cachedIconCandidates = emptyList()
         }
 
         private fun updateSelectedCommandFromField() {
             val normalized = commandField.text.trimStart().removePrefix("/")
             commandField.text = normalized
             selectedButton()?.command = normalized
-        }
-
-        internal fun iconCandidates(): List<IconCandidate> {
-            val search = iconField.text
-            if (search == lastIconSearch) return cachedIconCandidates
-            cachedIconCandidates = InventoryButtonManager.searchIconCandidates(search)
-            lastIconSearch = search
-            resultScrollRow = min(resultScrollRow, maxResultScrollRow())
-            return cachedIconCandidates
-        }
-
-        internal fun maxResultScrollRow(): Int {
-            val totalRows = ceil(iconCandidatesRawCount() / IconResults.COLUMNS.toDouble()).toInt()
-            return (totalRows - IconResults.ROWS).coerceAtLeast(0)
-        }
-
-        private fun iconCandidatesRawCount(): Int {
-            val search = iconField.text
-            if (search != lastIconSearch) {
-                cachedIconCandidates = InventoryButtonManager.searchIconCandidates(search)
-                lastIconSearch = search
-            }
-            return cachedIconCandidates.size
         }
     }
 
@@ -424,7 +385,7 @@ object InventoryButtonEditorScreen {
             ?: return InputHandlingResult.IGNORED
         InventoryButtonLayout.nudgeButton(
             InventoryButtonCanvas(
-                Rect(0, 0, InventoryPreview.WIDTH, InventoryPreview.HEIGHT),
+                Rect(0, 0, InventoryButtonPreviewDimensions.WIDTH, InventoryButtonPreviewDimensions.HEIGHT),
                 playerInventory = true,
             ),
             button,
@@ -442,7 +403,7 @@ object InventoryButtonEditorScreen {
             GLFW.GLFW_MOUSE_BUTTON_LEFT -> {
                 SoundUtilities.playClickSound()
                 commandField.focused = false
-                iconField.focused = false
+                iconSearch.field.focused = false
                 waitingForRequiredKey = true
                 InputHandlingResult.CONSUMED
             }
@@ -577,33 +538,29 @@ object InventoryButtonEditorScreen {
     private object EditorRenderer {
         fun renderInventoryPreview(screen: EditorScreen, context: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
             val previewScale = inventoryPreviewScale()
-            val previewWidth = (InventoryPreview.WIDTH * previewScale).roundToInt()
-            val previewHeight = (InventoryPreview.HEIGHT * previewScale).roundToInt()
-            val leftCandidate = (screen.width - previewWidth) / 2
-            val left = leftCandidate.coerceIn(
-                InventoryPreview.HORIZONTAL_MARGIN,
-                max(
-                    InventoryPreview.HORIZONTAL_MARGIN,
-                    screen.width - previewWidth - InventoryPreview.HORIZONTAL_MARGIN,
-                ),
-            )
-            val top = ((screen.height - previewHeight) / 2).coerceIn(
-                InventoryPreview.VERTICAL_MARGIN,
-                max(InventoryPreview.VERTICAL_MARGIN, screen.height - previewHeight - InventoryPreview.VERTICAL_MARGIN),
-            )
-            screen.lastInventoryLeft = left
-            screen.lastInventoryTop = top
-            screen.lastPreviewScale = previewScale
-
-            val previewMouseX = previewMouseX(screen, mouseX)
-            val previewMouseY = previewMouseY(screen, mouseY)
+            val geometry = InventoryButtonEditorGeometry.centered(screen.width, screen.height, previewScale)
+            screen.previewGeometry = geometry
+            val previewMouseX = geometry.previewMouseX(mouseX)
+            val previewMouseY = geometry.previewMouseY(mouseY)
             context.pose().pushMatrix()
-            context.pose().translate(left.toFloat(), top.toFloat())
+            context.pose().translate(geometry.left.toFloat(), geometry.top.toFloat())
             context.pose().scale(previewScale, previewScale)
             try {
                 val font = Minecraft.getInstance().font
-                context.fill(0, 0, InventoryPreview.WIDTH, InventoryPreview.HEIGHT, EditorColors.INVENTORY_BACKGROUND)
-                context.outline(0, 0, InventoryPreview.WIDTH, InventoryPreview.HEIGHT, EditorColors.INVENTORY_OUTLINE)
+                context.fill(
+                    0,
+                    0,
+                    InventoryButtonPreviewDimensions.WIDTH,
+                    InventoryButtonPreviewDimensions.HEIGHT,
+                    EditorColors.INVENTORY_BACKGROUND,
+                )
+                context.outline(
+                    0,
+                    0,
+                    InventoryButtonPreviewDimensions.WIDTH,
+                    InventoryButtonPreviewDimensions.HEIGHT,
+                    EditorColors.INVENTORY_OUTLINE,
+                )
                 context.text(
                     font,
                     "Crafting",
@@ -622,7 +579,15 @@ object InventoryButtonEditorScreen {
 
         fun renderSidePanel(screen: EditorScreen, context: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
             val selectedButton = screen.selectedButton()
-            val bounds = choosePanelBounds(screen)
+            val placements = InventoryButtonManager.placements(
+                left = 0,
+                top = 0,
+                imageWidth = InventoryButtonPreviewDimensions.WIDTH,
+                imageHeight = InventoryButtonPreviewDimensions.HEIGHT,
+                playerInventory = true,
+                includeInactive = true,
+            ).map { it.bounds }
+            val bounds = screen.previewGeometry.panelBounds(screen.width, screen.height, placements)
             screen.lastPanelBounds = bounds
             val font = Minecraft.getInstance().font
 
@@ -662,12 +627,6 @@ object InventoryButtonEditorScreen {
 
             renderSelectedEditor(screen, context, selectedButton, bounds, mouseX, mouseY)
         }
-
-        fun previewMouseX(screen: EditorScreen, mouseX: Int): Int =
-            floor((mouseX - screen.lastInventoryLeft) / screen.lastPreviewScale.toDouble()).toInt()
-
-        fun previewMouseY(screen: EditorScreen, mouseY: Int): Int =
-            floor((mouseY - screen.lastInventoryTop) / screen.lastPreviewScale.toDouble()).toInt()
 
         private fun drawInventorySlots(context: GuiGraphicsExtractor, left: Int, top: Int) {
             val font = Minecraft.getInstance().font
@@ -737,8 +696,8 @@ object InventoryButtonEditorScreen {
             val placements = InventoryButtonManager.placements(
                 left = left,
                 top = top,
-                imageWidth = InventoryPreview.WIDTH,
-                imageHeight = InventoryPreview.HEIGHT,
+                imageWidth = InventoryButtonPreviewDimensions.WIDTH,
+                imageHeight = InventoryButtonPreviewDimensions.HEIGHT,
                 playerInventory = true,
                 includeInactive = true,
             )
@@ -904,7 +863,7 @@ object InventoryButtonEditorScreen {
 
             context.text(font, "Icon Search", x, y, EditorColors.MUTED_TEXT, false)
             y += SelectedEditor.LABEL_TO_FIELD_GAP
-            screen.iconField.render(context, x, y, fieldWidth, EditorPanel.FIELD_HEIGHT, "chess, sprayonator, akinsoft")
+            screen.iconSearch.field.render(context, x, y, fieldWidth, EditorPanel.FIELD_HEIGHT, "chess, sprayonator, akinsoft")
             y += SelectedEditor.ICON_SEARCH_SECTION_GAP
 
             val results = Rect(x, y, fieldWidth, IconResults.HEIGHT)
@@ -941,7 +900,7 @@ object InventoryButtonEditorScreen {
                 EditorColors.ICON_RESULTS_BACKGROUND,
             )
             context.outline(bounds.x, bounds.y, bounds.width, bounds.height, EditorColors.ICON_RESULTS_OUTLINE)
-            val candidates = screen.iconCandidates()
+            val candidates = screen.iconSearch.candidates()
             if (candidates.isEmpty()) {
                 context.text(
                     font,
@@ -954,9 +913,9 @@ object InventoryButtonEditorScreen {
                 return
             }
 
-            screen.resultScrollRow = screen.resultScrollRow.coerceIn(0, screen.maxResultScrollRow())
+            screen.iconSearch.clampScroll()
             val visible = candidates
-                .drop(screen.resultScrollRow * IconResults.COLUMNS)
+                .drop(screen.iconSearch.scrollRow * IconResults.COLUMNS)
                 .take(IconResults.COLUMNS * IconResults.ROWS)
             context.enableScissor(bounds.x + 1, bounds.y + 1, bounds.x + bounds.width - 1, bounds.y + bounds.height - 1)
             try {
@@ -984,14 +943,14 @@ object InventoryButtonEditorScreen {
                 context.disableScissor()
             }
 
-            val maxScroll = screen.maxResultScrollRow()
+            val maxScroll = screen.iconSearch.maxScrollRow()
             if (maxScroll > 0) {
                 val barX = bounds.x + bounds.width - IconResults.SCROLLBAR_RIGHT_INSET
                 val barHeight = bounds.height - IconResults.SCROLLBAR_VERTICAL_INSET * 2
                 val knobHeight = max(IconResults.SCROLLBAR_MIN_KNOB_HEIGHT, barHeight / (maxScroll + 1))
                 val travel = barHeight - knobHeight
                 val knobY = bounds.y + IconResults.SCROLLBAR_VERTICAL_INSET +
-                    travel * screen.resultScrollRow / maxScroll
+                    travel * screen.iconSearch.scrollRow / maxScroll
                 context.fill(
                     barX,
                     bounds.y + IconResults.SCROLLBAR_VERTICAL_INSET,
@@ -1008,107 +967,6 @@ object InventoryButtonEditorScreen {
                 )
             }
         }
-
-        private fun choosePanelBounds(screen: EditorScreen): Rect {
-            val content = previewContentBounds(screen)
-            val maxPanelLeft = max(EditorPanel.MARGIN, screen.width - EditorPanel.WIDTH - EditorPanel.MARGIN)
-            val right = content.x + content.width + previewSideGap(screen, rightSide = true)
-            if (right + EditorPanel.WIDTH <= screen.width - EditorPanel.MARGIN) {
-                return Rect(right, sidePanelTop(screen, rightSide = true), EditorPanel.WIDTH, EditorPanel.HEIGHT)
-            }
-
-            val left = content.x - EditorPanel.WIDTH - previewSideGap(screen, rightSide = false)
-            if (left >= EditorPanel.MARGIN) {
-                return Rect(left, sidePanelTop(screen, rightSide = false), EditorPanel.WIDTH, EditorPanel.HEIGHT)
-            }
-
-            val horizontal = content.x + (content.width - EditorPanel.WIDTH) / 2
-                .coerceIn(EditorPanel.MARGIN, maxPanelLeft)
-            val below = content.y + content.height + previewVerticalGap(screen, bottomSide = true)
-            if (below + EditorPanel.HEIGHT <= screen.height - EditorPanel.MARGIN) {
-                return Rect(horizontal, below, EditorPanel.WIDTH, EditorPanel.HEIGHT)
-            }
-
-            val above = content.y - EditorPanel.HEIGHT - previewVerticalGap(screen, bottomSide = false)
-            if (above >= EditorPanel.MARGIN) return Rect(horizontal, above, EditorPanel.WIDTH, EditorPanel.HEIGHT)
-
-            val rightSpace = screen.width - (content.x + content.width)
-            val fallbackLeft = if (rightSpace >= content.x) {
-                screen.width - EditorPanel.WIDTH - EditorPanel.MARGIN
-            } else {
-                EditorPanel.MARGIN
-            }.coerceIn(EditorPanel.MARGIN, maxPanelLeft)
-            val top = sidePanelTop(screen, rightSide = rightSpace >= content.x)
-            return Rect(fallbackLeft, top, EditorPanel.WIDTH, EditorPanel.HEIGHT)
-        }
-
-        private fun sidePanelTop(screen: EditorScreen, rightSide: Boolean): Int {
-            val buttonTop = previewPlacements()
-                .asSequence()
-                .filter { placement ->
-                    if (rightSide) {
-                        placement.bounds.x >= InventoryPreview.WIDTH
-                    } else {
-                        placement.bounds.x + placement.bounds.width <= 0
-                    }
-                }
-                .minOfOrNull { it.bounds.y }
-                ?: 0
-            return (screen.lastInventoryTop + buttonTop * screen.lastPreviewScale).roundToInt().coerceIn(
-                EditorPanel.MARGIN,
-                max(EditorPanel.MARGIN, screen.height - EditorPanel.HEIGHT - EditorPanel.MARGIN),
-            )
-        }
-
-        private fun previewContentBounds(screen: EditorScreen): Rect {
-            var minX = 0
-            var minY = 0
-            var maxX = InventoryPreview.WIDTH
-            var maxY = InventoryPreview.HEIGHT
-            for (placement in previewPlacements()) {
-                minX = min(minX, placement.bounds.x)
-                minY = min(minY, placement.bounds.y)
-                maxX = max(maxX, placement.bounds.x + placement.bounds.width)
-                maxY = max(maxY, placement.bounds.y + placement.bounds.height)
-            }
-            val x0 = screen.lastInventoryLeft + floor(minX * screen.lastPreviewScale.toDouble()).toInt()
-            val y0 = screen.lastInventoryTop + floor(minY * screen.lastPreviewScale.toDouble()).toInt()
-            val x1 = screen.lastInventoryLeft + ceil(maxX * screen.lastPreviewScale.toDouble()).toInt()
-            val y1 = screen.lastInventoryTop + ceil(maxY * screen.lastPreviewScale.toDouble()).toInt()
-            return Rect(x0, y0, x1 - x0, y1 - y0)
-        }
-
-        private fun previewSideGap(screen: EditorScreen, rightSide: Boolean): Int {
-            val rawGap = previewPlacements().mapNotNull { placement ->
-                if (rightSide) {
-                    (placement.bounds.x - InventoryPreview.WIDTH).takeIf { it >= 0 }
-                } else {
-                    (0 - (placement.bounds.x + placement.bounds.width)).takeIf { it >= 0 }
-                }
-            }.minOrNull() ?: PREVIEW_PLACEMENT_GAP_FALLBACK
-            return (rawGap * screen.lastPreviewScale).roundToInt().coerceAtLeast(1)
-        }
-
-        private fun previewVerticalGap(screen: EditorScreen, bottomSide: Boolean): Int {
-            val rawGap = previewPlacements().mapNotNull { placement ->
-                if (bottomSide) {
-                    (placement.bounds.y - InventoryPreview.HEIGHT).takeIf { it >= 0 }
-                } else {
-                    (0 - (placement.bounds.y + placement.bounds.height)).takeIf { it >= 0 }
-                }
-            }.minOrNull() ?: PREVIEW_PLACEMENT_GAP_FALLBACK
-            return (rawGap * screen.lastPreviewScale).roundToInt().coerceAtLeast(1)
-        }
-
-        private fun previewPlacements(): List<InventoryButtonManager.ButtonPlacement> =
-            InventoryButtonManager.placements(
-                left = 0,
-                top = 0,
-                imageWidth = InventoryPreview.WIDTH,
-                imageHeight = InventoryPreview.HEIGHT,
-                playerInventory = true,
-                includeInactive = true,
-            )
 
         private fun inventoryPreviewScale(): Float {
             val minecraft = Minecraft.getInstance()
@@ -1158,15 +1016,6 @@ object InventoryButtonEditorScreen {
                 tone = tone,
             )
         }
-
-        private const val PREVIEW_PLACEMENT_GAP_FALLBACK = 2
-    }
-
-    private object InventoryPreview {
-        const val WIDTH = 176
-        const val HEIGHT = InventoryButtonDefaults.PLAYER_INVENTORY_HEIGHT
-        const val HORIZONTAL_MARGIN = 48
-        const val VERTICAL_MARGIN = 32
     }
 
     private object InventorySlots {
@@ -1208,9 +1057,6 @@ object InventoryButtonEditorScreen {
     }
 
     private object EditorPanel {
-        const val WIDTH = 196
-        const val HEIGHT = 354
-        const val MARGIN = 8
         const val INSET = 10
         const val FIELD_HEIGHT = 18
         const val TITLE_Y = 9
