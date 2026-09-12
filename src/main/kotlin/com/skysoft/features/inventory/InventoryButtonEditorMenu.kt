@@ -179,7 +179,7 @@ internal class InventoryButtonEditorMenu(
                     } else if (config().activePreset != presetIndex) {
                         config().switchPreset(presetIndex)
                         InventoryButtonGroups.collapseAll()
-                        InventoryButtonManager.clearIconCache()
+                        InventoryButtonIcons.clearIconCache()
                         onLayoutChanged()
                     }
                 }
@@ -220,7 +220,7 @@ internal class InventoryButtonEditorMenu(
             is PendingAction.Import -> config().replaceActiveButtons(action.buttons)
         }
         InventoryButtonGroups.collapseAll()
-        InventoryButtonManager.clearIconCache()
+        InventoryButtonIcons.clearIconCache()
         onLayoutChanged()
         pendingAction = null
         transition.hide()
