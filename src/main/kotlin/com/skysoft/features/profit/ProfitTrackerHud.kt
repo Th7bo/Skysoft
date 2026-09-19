@@ -226,7 +226,7 @@ private fun renderPositioned(
 }
 
 private fun registerMouseCapture() {
-    val isActive = { SkysoftConfigGui.config().profitTrackers.isAnyEnabled() }
+    val isActive = { SkysoftConfigGui.config().loot.profitTrackers.isAnyEnabled() }
     InventoryOverlayInput.registerClickHandler("Profit Tracker mouse click", isActive) { screen, click ->
         if (InventoryOverlayInput.isPointCovered(screen, click.x(), click.y())) {
             itemPanel.close()
@@ -266,7 +266,7 @@ private data class ProfitTrackerHoveredControl(
 )
 
 private fun ProfitTrackerControl?.usesItemPanel(): Boolean =
-    this == ProfitTrackerControl.More || this is ProfitTrackerControl.ManageItem
+    this == ProfitTrackerControl.More || this is ProfitTrackerControl.ManageItem || this == ProfitTrackerControl.ManageKernels
 
 private fun selectItemPanelTarget(target: ProfitTrackerTarget) {
     if (itemPanelTarget == target) return

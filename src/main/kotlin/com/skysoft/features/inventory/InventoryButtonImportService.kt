@@ -88,7 +88,7 @@ internal object InventoryButtonImportService {
         pendingPlan = null
     }
 
-    private fun config() = SkysoftConfigGui.config().inventory.inventoryButtons
+    private fun config() = SkysoftConfigGui.config().inventory.controls.inventoryButtons
 
     private data class ImportSnapshot(
         val buttons: List<InventoryButtonConfig>,

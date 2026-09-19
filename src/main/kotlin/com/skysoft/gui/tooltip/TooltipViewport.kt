@@ -2,12 +2,12 @@ package com.skysoft.gui.tooltip
 
 import com.skysoft.config.SkysoftConfigGui
 import com.skysoft.config.TooltipScrollConfig
+import com.skysoft.mixin.AbstractContainerScreenAccessor
 import com.skysoft.mixin.ClientTextTooltipAccessor
 import com.skysoft.utils.MinecraftClient
 import com.skysoft.utils.gui.Rect
 import com.skysoft.utils.input.InputUtilities
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.screens.ChatScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent
@@ -36,7 +36,6 @@ object TooltipViewport {
 
     @JvmStatic
     fun decorate(
-        font: Font,
         components: List<ClientTooltipComponent>,
         anchorX: Int,
         anchorY: Int,
@@ -49,7 +48,7 @@ object TooltipViewport {
             !isEnabledForCurrentScreen(settings) ||
             components.isEmpty()
         ) return original
-        return OffsetPositioner(original, tooltipIdentity(font, components), anchorX, anchorY)
+        return OffsetPositioner(original, tooltipIdentity(components), anchorX, anchorY)
     }
 
     /**
@@ -232,20 +231,12 @@ object TooltipViewport {
 
     private fun isKeyDown(key: Int): Boolean = InputUtilities.isBindingDown(key)
 
-    /**
-     * Identifies the hovered tooltip well enough to notice that a different one took its place. Text styles are left
-     * out on purpose: chroma and other animated colors change every frame, and treating that as a new tooltip would
-     * reset the panned position before the wheel could ever move it.
-     */
-    private fun tooltipIdentity(font: Font, components: List<ClientTooltipComponent>): Int {
-        var result = 1
-        for (component in components) {
-            result = HASH_MULTIPLIER * result + component.javaClass.hashCode()
-            result = HASH_MULTIPLIER * result + component.getWidth(font)
-            result = HASH_MULTIPLIER * result + component.getHeight(font)
-            if (component is ClientTextTooltipAccessor) {
-                result = HASH_MULTIPLIER * result + textIdentity(component.skysoftGetText())
-            }
+    private fun tooltipIdentity(components: List<ClientTooltipComponent>): Int {
+        val slot = (MinecraftClient.screen(minecraft) as? AbstractContainerScreenAccessor)?.skysoftGetHoveredSlot()
+        val title = components.first()
+        var result = HASH_MULTIPLIER * slot.hashCode() + title.javaClass.hashCode()
+        if (title is ClientTextTooltipAccessor) {
+            result = HASH_MULTIPLIER * result + textIdentity(title.skysoftGetText())
         }
         return result
     }
@@ -259,7 +250,7 @@ object TooltipViewport {
         return result
     }
 
-    private fun config(): TooltipScrollConfig = SkysoftConfigGui.config().inventory.tooltipScroll
+    private fun config(): TooltipScrollConfig = SkysoftConfigGui.config().inventory.tooltips.tooltipScroll
 
     private data class OffsetPositioner(
         val original: ClientTooltipPositioner,

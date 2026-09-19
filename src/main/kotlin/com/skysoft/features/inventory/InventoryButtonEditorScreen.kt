@@ -42,7 +42,7 @@ object InventoryButtonEditorScreen {
         InventoryScaledScreen,
         TooltipScrollExcludedScreen {
         override fun inventoryScaleLimit(): Int = 2
-        internal val config get() = SkysoftConfigGui.config().inventory.inventoryButtons
+        internal val config get() = SkysoftConfigGui.config().inventory.controls.inventoryButtons
         internal val commandField = TextFieldState(maxLength = 128)
         internal val iconSearch = InventoryButtonIconSearch(IconResults.COLUMNS, IconResults.ROWS)
         internal var selectedIndex: Int? = null
@@ -970,7 +970,7 @@ object InventoryButtonEditorScreen {
 
         private fun inventoryPreviewScale(): Float {
             val minecraft = Minecraft.getInstance()
-            val inventoryConfig = SkysoftConfigGui.config().gui.inventoryScreen
+            val inventoryConfig = SkysoftConfigGui.config().inventory.appearance.inventoryScreen
             if (!shouldUseConfiguredInventoryScale(
                     inventoryConfig.separateInventoryGuiScale,
                     inventoryConfig.settings.isInventoryGuiScaleStorageOnly,
