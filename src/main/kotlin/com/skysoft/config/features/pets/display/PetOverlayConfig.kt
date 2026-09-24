@@ -11,6 +11,7 @@ import io.github.notenoughupdates.moulconfig.Config
 import io.github.notenoughupdates.moulconfig.annotations.Accordion
 import io.github.notenoughupdates.moulconfig.annotations.Category
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorBoolean
+import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorDropdown
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorInfoText
 import io.github.notenoughupdates.moulconfig.annotations.ConfigEditorSlider
 import io.github.notenoughupdates.moulconfig.annotations.ConfigLink
@@ -64,10 +65,38 @@ class PetOverlayConfig : Config() {
         val hideInMenus: Property<Boolean> = Property.of(false)
 
         @JvmField
+        @field:Expose
+        @field:ConfigOption(
+            name = "Horizontal Anchor",
+            desc = "Which part of the Pet Display stays in place when its width changes.",
+        )
+        @field:ConfigEditorDropdown
+        val horizontalAnchor: Property<HorizontalAnchor> = Property.of(HorizontalAnchor.CENTER)
+
+        @JvmField
+        @field:Expose
+        @field:ConfigOption(
+            name = "Visualize Anchor",
+            desc = "Show the selected anchor as a red line while cycling differently sized pets in the preview.",
+        )
+        @field:ConfigEditorBoolean
+        val visualizeAnchor: Property<Boolean> = Property.of(false)
+
+        enum class HorizontalAnchor(private val displayName: String) {
+            LEFT("Left"),
+            CENTER("Center"),
+            RIGHT("Right"),
+            ;
+
+            override fun toString(): String = displayName
+        }
+
+        @JvmField
         @field:ConfigOption(
             name = "§cXP Accuracy",
             desc = "Pet Display requires the Pet display in Hypixel's /widget menu. " +
-                "Skysoft estimates live XP between widget updates. For maxed pets, enable Pet widget overflow XP too."
+                "Skysoft estimates live XP between widget updates. Enable Show Overflow XP and Pet widget overflow XP " +
+                "to display exact XP for maxed pets."
         )
         @field:ConfigEditorInfoText
         val xpAccuracyWarning: Unit = Unit
